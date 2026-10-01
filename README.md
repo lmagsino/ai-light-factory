@@ -109,6 +109,17 @@ Every skill is a `SKILL.md` in the open [Agent Skills](https://agentskills.io/sp
 
 [The line](docs/the-line.md) · [Guardrails](docs/guardrails.md) · [Rules](docs/rules.md) · [Install and agents](docs/install.md) · [Cost](docs/cost.md) · [Comparison](docs/comparison.md) · [Demo](docs/demo.md)
 
+## Sources and inspiration
+
+- Addy Osmani, [Software Factories, Light and Dark](https://addyosmani.com/blog/software-factories/): the light versus dark factory distinction this project is built on.
+- [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills): engineering skills for incremental builds, TDD and code review that pair well with the Developer and Reviewer seats.
+- [addyosmani/factory](https://github.com/addyosmani/factory): a reference light factory built on a GitHub issue queue.
+- [mattpocock/skills](https://github.com/mattpocock/skills): `grill-with-docs`, whose one-question-at-a-time interview the Architect borrows, and `to-tickets`.
+- [Agent Skills specification](https://agentskills.io/specification): the open `SKILL.md` format every skill here follows.
+- Claude Code [plugins](https://code.claude.com/docs/en/plugins-reference) and [hooks](https://code.claude.com/docs/en/hooks): how AI Light Factory installs and how its guard hook works.
+- [Codex CLI](https://developers.openai.com/codex/skills): the second-vendor reviewer in the reference setup.
+- [awesome-software-factories](https://github.com/varun1505/awesome-software-factories): the wider landscape. See [docs/comparison.md](docs/comparison.md) for how this project differs.
+
 ## About
 
 Built by **Leo Magsino Jr**, a tech lead working on how teams ship with fleets of coding agents without losing the plot.
