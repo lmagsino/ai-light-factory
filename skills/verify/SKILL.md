@@ -1,13 +1,13 @@
 ---
 name: verify
-description: Stage 4 of the AI Light Factory. Proves a milestone, feature or PR set behaves correctly where it will actually run, by driving the running app end to end (Playwright) in every feature-flag state and recording each journey as PASS, FAIL, NOT RUN or N/A with an artefact. Checks that every planned ticket has a PR and that nothing else broke. Use when a milestone's PRs are drafted, or when someone asks to verify, QA or prove a feature before merge.
+description: The last stage of the AI Light Factory, after /alf:dev-loop. Proves a parent issue, milestone, feature or PR set behaves correctly where it will actually run, by driving the running app end to end (Playwright) in every feature-flag state and recording each journey as PASS, FAIL, NOT RUN or N/A with an artefact. Checks that every planned ticket has a PR and that nothing else broke. Use when a parent's or milestone's PRs are drafted, or when someone asks to verify, QA or prove a feature before merge.
 license: MIT
 compatibility: Needs the app's dev server command and, for browser legs, a Playwright harness. Without one, browser legs are reported as NOT RUN.
 ---
 
 # Verifier: prove it works where it will run
 
-**Input:** `$ARGUMENTS`, one of: a milestone title, a named feature, or a PR list (`#57 #58 #61`). The scope decides what "promised" means.
+**Input:** `$ARGUMENTS`, one of: a parent issue (`#40`), a milestone (`milestone:NAME`), a named feature, or a PR list (`#57 #58 #61`). The scope decides what "promised" means.
 **Output:** `.factory/verdicts/YYYY-MM-DD-<scope>.md` (format: `${CLAUDE_PLUGIN_ROOT}/templates/verdict.md`), plus a short comment on each PR in scope linking it.
 **Cadence:** once per milestone or phase, not once per PR. Until a phase is nearly done there is usually nothing end to end to exercise, and verifying per ticket produces theatre.
 
@@ -18,8 +18,8 @@ There is one Verifier at a time, because it binds the app's port. Take the lock 
 ## Three claims, and they are not the same claim
 
 ### 1. It does what was promised
-- **Every planned ticket has a PR.** Compare the plan file (or the milestone's issues) against the PRs. A dropped ticket leaves nothing to review, so no per-PR check ever notices it. List any that are missing.
-- **The milestone's outcome, driven in the running app.** Drive the outcome the PRD describes, not each ticket's slice (the band already checked those).
+- **Every planned ticket has a PR.** Compare `tasks/plan.md` and the parent's tickets (or the milestone's issues) against the PRs. A dropped ticket leaves nothing to review, so no per-PR check ever notices it. List any that are missing.
+- **The milestone's outcome, driven in the running app.** Drive the outcome the PRD describes, not each ticket's slice (the dev loop already checked those).
 
 ### 2. Nothing else broke
 - Find the flows that actually go through the changed files: search for callers, routes and jobs that reach them. Do not guess.
@@ -67,7 +67,7 @@ Make one row per journey **per flag state**, not one row per journey with a note
 
 For each FAIL, decide which stage should have caught it, and say so:
 - **The code is wrong** (it does not behave as the plan said, and the code is the reason): goes back to the Developer as a new ticket, or a fix on the PR.
-- **The plan is wrong** (it behaves as planned, and the plan was wrong about the world): goes back to `/alf:architect`. This is the expensive path, and the reason this stage exists.
+- **The plan is wrong** (it behaves as planned, and the plan was wrong about the world): goes back to `/mattpocock-skills:grill-with-docs`, which records the correction as a new ADR. This is the expensive path, and the reason this stage exists.
 
 ## Finish
 
