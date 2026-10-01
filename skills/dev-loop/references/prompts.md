@@ -2,24 +2,26 @@
 
 Write one prompt file per dispatch to `$RUN/<n>/<role>-<step>.prompt.md`, filled in from these templates. Every prompt:
 
-- names the SKILL.md to follow **by absolute path** (dispatch refuses paths that do not resolve)
+- names the seat contract and the companion SKILL.md files **by absolute path** (dispatch refuses paths that do not resolve). Companion paths come from `.factory/config.json` → `companions`.
 - inlines the acceptance criteria rather than asking the worker to fetch the issue
 - names every input by file path, and says where outputs go
 - ends by requiring a single `ALF ...` status line as the last line of output
 
-`${CLAUDE_PLUGIN_ROOT}` below is a placeholder. Substitution happens only in SKILL.md files, so replace it with the absolute plugin root printed in the loop skill's text. `alf-dispatch` refuses relative paths.
+`${CLAUDE_PLUGIN_ROOT}` below is a placeholder. Substitution happens only in SKILL.md files, so replace it with the absolute plugin root printed in the dev-loop skill's text. `alf-dispatch` refuses relative paths.
 
 ## Developer: build
 
 ```
-You are the Developer seat in an AI Light Factory run. Follow ${CLAUDE_PLUGIN_ROOT}/skills/build/SKILL.md exactly.
+You are the Developer seat in an AI Light Factory run.
+Seat contract (follow exactly; it wins on any conflict): ${CLAUDE_PLUGIN_ROOT}/skills/dev-loop/seats/developer.md
+How to build (read both): {companions.implementation} and {companions.tdd}
 
 mode: build
 ticket: #{n} · {title}
 ticket file: {RUN}/tickets/{n}.md      (read this; do not fetch the issue)
 acceptance criteria:
 {criteria, verbatim}
-decisions: {decisions file path} cards {D3, D7}
+decisions: the ADRs in docs/adr/ that cover the files you touch
 base: {base branch}
 branch: factory/{n}-{slug}
 run dir: {RUN}/{n}/
@@ -45,7 +47,7 @@ As above with `mode: ship` and:
 judged files: {RUN}/{n}/judged-r1.md {RUN}/{n}/judged-r2.md
 PR body template: ${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md
 assignee: {repo.human}
-bot reviewer: {band.bot_reviewer or "none"}
+bot reviewer: {loop.bot_reviewer or "none"}
 reviewer provenance: {copy vendor=, model= and same_vendor= from the Reviewer's status line}
 Last line: ALF developer DONE pr=#<n> sha=<sha> tests=green
 ```
@@ -53,7 +55,9 @@ Last line: ALF developer DONE pr=#<n> sha=<sha> tests=green
 ## Reviewer
 
 ```
-You are the Reviewer seat in an AI Light Factory run. Follow ${CLAUDE_PLUGIN_ROOT}/skills/review/SKILL.md exactly.
+You are the Reviewer seat in an AI Light Factory run.
+Seat contract (follow exactly; it wins on any conflict): ${CLAUDE_PLUGIN_ROOT}/skills/dev-loop/seats/reviewer.md
+How to review (five axes and severities): {companions.code_review}
 You have fresh context on purpose. Do not look for earlier reviews of this ticket except the round-1 file named below.
 
 round: {1|2}
@@ -61,7 +65,7 @@ diff: {base_sha}..{head_sha}         (round 2: {round1_sha}..{head_sha}, the del
 ticket file: {RUN}/tickets/{n}.md
 acceptance criteria:
 {criteria, verbatim}
-decisions: {decisions file path}     (read its "Deliberate deviations" table)
+decisions: docs/adr/            (ADRs covering the changed files)
 reach matrix: .factory/matrix.md
 round-1 judged findings (round 2 only): {RUN}/{n}/judged-r1.md
 write findings to: {RUN}/{n}/review-r{round}.md
@@ -74,7 +78,8 @@ The Reviewer reads and runs tests; it never pushes or comments. In the reference
 ## Guardian
 
 ```
-You are the PR Guardian seat in an AI Light Factory run. Follow ${CLAUDE_PLUGIN_ROOT}/skills/guardian/SKILL.md exactly.
+You are the PR Guardian seat in an AI Light Factory run.
+Seat contract (follow exactly): ${CLAUDE_PLUGIN_ROOT}/skills/dev-loop/seats/guardian.md
 
 PRs (batch): #{a} #{b} #{c}
 stack parents: #{b} -> #{a}           (rebase onto a parent that moved)

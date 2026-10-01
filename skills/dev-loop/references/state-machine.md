@@ -1,4 +1,4 @@
-# Band state machine
+# Dev loop state machine
 
 ## state.json
 
@@ -44,7 +44,7 @@ Each dispatch has its own status file, `seats/<Seat>.<n>.json`. The board reads 
 | From | Signal | To | Action |
 |---|---|---|---|
 | WAIT | every blocker merged, or open as a PR to stack on | READY | |
-| READY | `acquire` returns a seat (not NO_FREE_LANE / BUDGET_SPENT) | LANE `building` | dispatch `build`; label `factory:in-band` |
+| READY | `acquire` returns a seat (not NO_FREE_LANE / BUDGET_SPENT) | LANE `building` | dispatch `build`; label `factory:in-loop` |
 | LANE `building` | `ALF developer DONE ... tests=green` | LANE `review round 1` | acquire Reviewer seat at `--ref <sha>`; dispatch `review` (round 1, full diff vs base) |
 | LANE `building` | `... FAIL tests=red` | PARK | "tests red after build" + evidence path |
 | LANE `review round N` | `ALF reviewer DONE findings=K path=F` | LANE `judging` | read F only; apply the ladder; write judged-rN.md |
@@ -52,8 +52,8 @@ Each dispatch has its own status file, `seats/<Seat>.<n>.json`. The board reads 
 | LANE `review round N` | `APPROACH: wrong` in the findings file | PARK | stop reason 1 |
 | LANE `judging` | kept = 0 | LANE `shipping` | dispatch `build` in mode `ship` |
 | LANE `judging` | kept > 0, N = 1 | LANE `fixing` | dispatch `build` in mode `fix` with judged-r1.md |
-| LANE `judging` | High kept, N = 2 | PARK | stop reason 3 ("round 2: High survives") |
-| LANE `judging` | only Medium-small kept, N = 2 | LANE `fixing` then `shipping` | fix, then ship without a round 3 |
+| LANE `judging` | Critical kept, N = 2 | PARK | stop reason 3 ("round 2: Critical survives") |
+| LANE `judging` | only small Important kept, N = 2 | LANE `fixing` then `shipping` | fix, then ship without a round 3 |
 | LANE `fixing` | `DONE ... tests=green` | LANE `review round 2` | `acquire reviewer --seat <round-1 seat> --ref <new sha>`; review the delta only |
 | LANE `shipping` | `ALF developer DONE pr=#P sha=S` | SWEEP or DONE | record pr and sha; update `tip`; request the bot reviewer if configured |
 | SWEEP | `ALF guardian DONE swept=#P,...` with #P not in `remaining` | DONE | |
@@ -67,9 +67,9 @@ Each dispatch has its own status file, `seats/<Seat>.<n>.json`. The board reads 
 For each finding in the reviewer's file:
 
 1. **No evidence → drop.** A finding must cite a line, a failing command, or a search result. "Might be an issue" with nothing behind it is dropped with the reason "no evidence".
-2. **Critical / High → fix.**
-3. **Medium → fix** when the reviewer's `est_lines` is under `ladder.fix_medium_under_lines` (default 20). Otherwise **Not addressed**, listed for the human.
-4. **Low → dropped**, with a one-line reason ("naming preference", "style, no behaviour change").
+2. **Critical → fix.**
+3. **Important → fix** when the reviewer's `est_lines` is under `ladder.fix_important_under_lines` (default 20). Otherwise **Not addressed**, listed for the human.
+4. **Suggestion → dropped**, with a one-line reason ("naming preference", "style, no behaviour change").
 5. **Reach findings** (outward contract changed, shared or registry path, deviation touched) are never dropped. If a fix is not small, the finding becomes *Not addressed* and is listed first in the PR body.
 
 Write `judged-rN.md` as a table: id, severity, call, reason, finding. The Developer's fix dispatch reads only the *Fix* rows.

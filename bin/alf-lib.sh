@@ -28,11 +28,11 @@ repo_name() { basename "$(main_root)"; }
 
 config_path() { printf '%s/.factory/config.json' "$(main_root)"; }
 
-# cfg '.band.lanes' [default]
+# cfg '.loop.lanes' [default]
 cfg() {
   local f v
   f="$(config_path)"
-  [[ -f "$f" ]] || die "no .factory/config.json - run /alf:setup first"
+  [[ -f "$f" ]] || die "no .factory/config.json - run /alf:dev-loop setup first"
   v="$(jq -r "($1) // empty" "$f")"
   if [[ -z "$v" && $# -ge 2 ]]; then v="$2"; fi
   printf '%s' "$v"
@@ -40,7 +40,7 @@ cfg() {
 
 worktree_root() {
   local tmpl
-  tmpl="$(cfg '.band.worktree_root' '../{repo}.alf')"
+  tmpl="$(cfg '.loop.worktree_root' '../{repo}.alf')"
   tmpl="${tmpl//\{repo\}/$(repo_name)}"
   case "$tmpl" in
     /*) printf '%s' "$tmpl" ;;
