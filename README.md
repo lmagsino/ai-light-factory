@@ -13,7 +13,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/line-dark.svg">
-    <img alt="The line: you write a PRD; grill-with-docs settles the decisions; agent-skills plan writes the plan; to-tickets publishes tickets with blocking edges; the dev loop, where one agent builds, an agent from another vendor reviews, and a PR Guardian answers review threads, opens draft PRs; verify checks every flag state; you merge." src="docs/assets/line-light.svg" width="100%">
+    <img alt="The line: you write a PRD; the Architect (grill-with-docs) settles the decisions; the Planner writes the plan (agent-skills plan) and publishes tickets with blocking edges (to-tickets); the dev loop, where one agent builds, an agent from another vendor reviews, and a PR Guardian answers review threads, opens draft PRs; the Verifier (/alf:verify) checks every flag state; you merge." src="docs/assets/line-light.svg" width="100%">
   </picture>
 </p>
 
