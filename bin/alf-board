@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# alf-board — the one surface you read while the band runs.
+#
+#   alf-board <run-dir>
+#
+# Prints <run-dir>/state.json as aligned columns, ordered by what needs you:
+# PARK, then LANE and SWEEP, then READY, WAIT, SKIP, DONE. One row is one line; long
+# names are truncated, never wrapped, because one wrapped row breaks the
+# alignment of every row below it. Columns are ASCII so byte width = column width.
+#
+# Verifies before it prints: a row that claims a seat is working, against a seat
+# with no live process, is shown as CHECK. A board that prints an unverified
+# claim launders the error into something that looks authoritative.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need jq
+
+[[ $# -ge 1 ]] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+RUN="$1"
+STATE="$RUN/state.json"
+[[ -f "$STATE" ]] || die "no state.json in $RUN"
+
+latest_status() { # Seat -> path of its most recent dispatch status file, if any
+  local f best="" n bestn=0
+  for f in "$RUN/seats/$1".*.json; do
+    [[ -f "$f" ]] || continue
+    n="${f%.json}"; n="${n##*.}"
+    [[ "$n" =~ ^[0-9]+$ ]] || continue
+    if (( n > bestn )); then bestn=$n; best="$f"; fi
+  done
+  printf '%s' "$best"
+}
+
+seat_live() { # Seat -> 0 when its latest dispatch is starting, or running with a live pid
+  local f state
+  f="$(latest_status "$1")"
+  [[ -n "$f" ]] || return 1
+  state="$(jq -r .state "$f")"
+  [[ "$state" == starting ]] && return 0
+  [[ "$state" == running ]] || return 1
+  pid_alive "$(jq -r '.pid // empty' "$f")"
+}
+
+rank() {
+  case "$1" in PARK) echo 0 ;; CHECK) echo 1 ;; LANE) echo 2 ;; SWEEP) echo 3 ;; READY) echo 4 ;; WAIT) echo 5 ;; SKIP) echo 6 ;; DONE) echo 7 ;; *) echo 8 ;; esac
+}
+
+W_TICKET=26 W_PR=18 W_SEAT=12 W_STATE=34 W_NEXT=26
+rule() { printf '%*s\n' $((7 + W_TICKET + W_PR + W_SEAT + W_STATE + W_NEXT + 4)) '' | tr ' ' '-'; }
+
+rows=()
+checks=0
+while IFS=$'\t' read -r flag ticket pr seat state next; do
+  if [[ "$flag" == LANE || "$flag" == SWEEP ]] && [[ "$seat" != "-" && -n "$seat" ]]; then
+    if ! seat_live "$seat"; then
+      flag="CHECK"; state="$state (no live agent)"; checks=$((checks + 1))
+    fi
+  fi
+  rows+=("$(rank "$flag")"$'\t'"$flag"$'\t'"$ticket"$'\t'"$pr"$'\t'"$seat"$'\t'"$state"$'\t'"$next")
+done < <(jq -r 'def d: if . == null or . == "" then "-" else tostring end;
+  .tickets[] | [
+    (.flag | d),
+    (((.key // "") + " #" + (.id|tostring) + " " + (.title // "")) | ltrimstr(" ")),
+    (if .pr then ("#" + (.pr|tostring) + (if .sha then " " + .sha[0:7] else "" end)) else "-" end),
+    (.seat | d),
+    (.state | d),
+    (.next | d)
+  ] | @tsv' "$STATE")
+
+printf '%s  %s\n' "$(jq -r '.run' "$STATE")" "$(date '+%a %d %b %H:%M')"
+rule
+printf '%-6s %-*s %-*s %-*s %-*s %s\n' FLAG "$W_TICKET" TICKET "$W_PR" "PR / SHA" "$W_SEAT" SEAT "$W_STATE" STATE NEXT
+rule
+if ((${#rows[@]})); then
+  printf '%s\n' "${rows[@]}" | sort -t$'\t' -k1,1n -s | while IFS=$'\t' read -r _ flag ticket pr seat state next; do
+    printf '%-6s %-*.*s %-*.*s %-*.*s %-*.*s %.*s\n' "$flag" \
+      "$W_TICKET" "$W_TICKET" "$ticket" "$W_PR" "$W_PR" "$pr" "$W_SEAT" "$W_SEAT" "$seat" \
+      "$W_STATE" "$W_STATE" "$state" "$W_NEXT" "$next"
+  done
+fi
+rule
+
+count() { jq --arg f "$1" '[.tickets[] | select(.flag == $f)] | length' "$STATE"; }
+lanes_used="$(( $(count LANE) - checks ))"; (( lanes_used < 0 )) && lanes_used=0
+lanes="$(jq -r '.lanes // 2' "$STATE")"
+guardians=0
+for s in Guardian Guardian-2; do seat_live "$s" && guardians=$((guardians + 1)); done
+budget="$(jq -r '.budget // 0' "$STATE")"
+drafted="$(jq '[.tickets[] | select(.pr != null)] | length' "$STATE")"
+cost=0
+if [[ -f "$(ledger_path)" ]]; then
+  cost="$(jq -rs --arg run "$(basename "$RUN")" \
+          '[.[] | select(.event == "dispatch" and .run == $run) | (.cost_usd // 0)] | add // 0' \
+          "$(ledger_path)" 2>/dev/null)" || cost=0
+fi
+cost="$(printf '%.2f' "${cost:-0}")"
+tip="$(jq -r '.tip // "-"' "$STATE")"
+
+printf '%s advancing · %s sweeping · %s needs you · %s ready · %s waiting · %s skipped · %s done' \
+  "$lanes_used" "$(count SWEEP)" "$(( $(count PARK) + checks ))" "$(count READY)" "$(count WAIT)" "$(count SKIP)" "$(count DONE)"
+printf '    lanes %s/%s · guardian %s/2 · drafted %s%s · $%s · tip %s\n' \
+  "$lanes_used" "$lanes" "$guardians" "$drafted" "$( [[ "$budget" != 0 ]] && echo "/$budget" )" "$cost" "$tip"
