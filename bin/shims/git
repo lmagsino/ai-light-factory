@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# alf shim for git. alf-dispatch puts this directory first on every band worker's
+# alf shim for git. alf-dispatch puts this directory first on every dev-loop worker's
 # PATH, so the never-merge rules hold whichever agent CLI is in the seat: pushes to
 # the integration branch and force-pushes without a lease are refused here.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

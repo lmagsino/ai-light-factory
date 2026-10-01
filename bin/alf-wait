@@ -18,7 +18,7 @@ need jq
 
 [[ $# -ge 1 ]] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 RUN="$1"; shift
-TIMEOUT_MIN="$(cfg '.band.wait_timeout_min' 45)"
+TIMEOUT_MIN="$(cfg '.loop.wait_timeout_min' 45)"
 INTERVAL=15
 while [[ $# -gt 0 ]]; do
   case "$1" in

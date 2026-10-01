@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# alf-seat — named worktrees ("seats") for the build band.
+# alf-seat — named worktrees ("seats") for the dev loop.
 #
 #   alf-seat acquire <role> [--ref <git-ref>] [--run <run-dir>] [--ticket <n>] [--seat <Seat>]
 #   alf-seat release <Seat>
@@ -11,8 +11,8 @@
 # never a nameless detached tree in /tmp. The name is the only thing that lets
 # the sweep tell a seat from somebody's abandoned work.
 #
-# acquire enforces the band's limits mechanically: two seats per role (one
-# Verifier), at most band.lanes tickets in flight (never more than two), and the
+# acquire enforces the dev loop's limits mechanically: two seats per role (one
+# Verifier), at most loop.lanes tickets in flight (never more than two), and the
 # run's --budget. It runs commands.setup in a seat whose lockfiles changed.
 # --seat asks for a specific seat (a round-2 review re-uses its round-1 seat).
 #
@@ -43,9 +43,9 @@ seat_busy() { # Seat -> 0 if held by a live dispatch or an explicit claim
 
 max_lanes() {
   local n
-  n="$(cfg '.band.lanes' 2)"
-  [[ "$n" =~ ^[0-9]+$ ]] || die "band.lanes must be 1 or 2"
-  (( n > 2 )) && die "band.lanes=$n refused: two is the ceiling, not a starting point"
+  n="$(cfg '.loop.lanes' 2)"
+  [[ "$n" =~ ^[0-9]+$ ]] || die "loop.lanes must be 1 or 2"
+  (( n > 2 )) && die "loop.lanes=$n refused: two is the ceiling, not a starting point"
   (( n < 1 )) && n=1
   echo "$n"
 }

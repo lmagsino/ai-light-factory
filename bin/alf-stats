@@ -149,7 +149,7 @@ def main():
     print("| Metric | Value |\n|---|---|")
     for k, v in rows:
         print(f"| {k} | {v} |")
-    print("\nCost covers band workers only (the orchestrator runs in your own session). "
+    print("\nCost covers dev-loop workers only (the orchestrator runs in your own session). "
           "Codex seats report no cost; count them by sessions.")
 
 

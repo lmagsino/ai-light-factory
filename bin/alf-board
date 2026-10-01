@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# alf-board — the one surface you read while the band runs.
+# alf-board — the one surface you read while the dev loop runs.
 #
 #   alf-board <run-dir>
 #

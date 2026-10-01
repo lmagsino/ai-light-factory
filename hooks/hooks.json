@@ -1,5 +1,5 @@
 {
-  "description": "alf: band workers and the running orchestrator can never merge, mark ready, approve, open a non-draft PR, push to the integration branch, or force-push without a lease.",
+  "description": "alf: dev-loop workers and the running orchestrator can never merge, mark ready, approve, open a non-draft PR, push to the integration branch, or force-push without a lease.",
   "hooks": {
     "PreToolUse": [
       {
