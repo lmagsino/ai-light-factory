@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SPEC_FIELDS = {"name", "description", "license", "compatibility", "metadata", "allowed-tools"}
 CLAUDE_FIELDS = {"disable-model-invocation", "argument-hint", "arguments", "user-invocable", "when_to_use",
                  "model", "effort", "context", "agent", "paths", "hooks", "shell", "disallowed-tools", "background"}
-PORTABLE = {"build", "review", "guardian"}  # may run under Codex
+PORTABLE = set()  # seat contracts live in skills/dev-loop/seats/ and are plain markdown
 
 errors = []
 

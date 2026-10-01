@@ -18,6 +18,11 @@
     "platform": "none",
     "notes": ""
   },
+  "companions": {
+    "implementation": "",
+    "tdd": "",
+    "code_review": ""
+  },
   "seats": {
     "developer": {
       "vendor": "claude",
@@ -53,7 +58,7 @@
       "max_turns": 250
     }
   },
-  "band": {
+  "loop": {
     "lanes": 2,
     "review_rounds": 2,
     "guardian_batch": 5,
@@ -65,20 +70,18 @@
   },
   "ladder": {
     "fix": [
-      "critical",
-      "high"
+      "critical"
     ],
-    "fix_medium_under_lines": 20,
+    "fix_important_under_lines": 20,
     "drop": [
-      "low"
+      "suggestion"
     ]
   },
   "paths": {
-    "decisions": ".factory/decisions",
-    "plans": ".factory/plans",
+    "decisions": "docs/adr",
+    "plan": "tasks/plan.md",
     "verdicts": ".factory/verdicts",
     "runs": ".factory/runs",
-    "matrix": ".factory/matrix.md",
-    "precedents": ".factory/precedents.md"
+    "matrix": ".factory/matrix.md"
   }
 }
