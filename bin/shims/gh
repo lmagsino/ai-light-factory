@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# alf shim for gh. alf-dispatch puts this directory first on every band worker's
+# PATH, so the never-merge rules hold whichever agent CLI is in the seat: merge,
+# ready, approve and non-draft PRs are refused here, through the CLI or the API.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+name="$(basename "${BASH_SOURCE[0]}")"
+case " $* " in
+  *) python3 "$here/../../hooks/guard.py" --argv "$name" "$@" || exit $? ;;
+esac
+old_ifs="$IFS"; IFS=:; set -f
+# shellcheck disable=SC2206  # splitting PATH on ':' is the point
+dirs=($PATH)
+set +f; IFS="$old_ifs"
+for d in "${dirs[@]}"; do
+  [[ "$d" == "$here" || -z "$d" ]] && continue
+  [[ -x "$d/$name" ]] && exec "$d/$name" "$@"
+done
+echo "alf shim: the real $name was not found on PATH" >&2
+exit 127
