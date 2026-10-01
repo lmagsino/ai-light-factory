@@ -39,4 +39,4 @@ Every cell is PASS, FAIL, NOT RUN with a reason, or N/A with a reason. None are 
 
 ## Failures
 
-For each FAIL: expected, actual, trace path, and whether the code is wrong (back to the Developer) or the plan is wrong (back to the Architect).
+For each FAIL: expected, actual, trace path, and whether the code is wrong (back to the Developer) or the plan is wrong (back to grill-with-docs, as a new ADR).

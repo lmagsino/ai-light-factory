@@ -6,13 +6,13 @@ never approves, never opens a non-draft PR, never pushes to the integration
 branch, and never force-pushes without a lease. This hook makes that a property
 of the tools rather than a sentence in a prompt.
 
-Two ways in. As a Claude Code hook (stdin JSON) it covers Claude band workers and
-the session running /alf:loop. As `guard.py --argv git ...` it is called by the
+Two ways in. As a Claude Code hook (stdin JSON) it covers Claude dev-loop workers and
+the session running /alf:dev-loop. As `guard.py --argv git ...` it is called by the
 git and gh shims that alf-dispatch puts first on every worker's PATH, so the same
 rules hold whatever agent CLI sits in the seat.
 
-Hook scope: only band workers (ALF_SEAT is set by alf-dispatch) and the
-session currently running /alf:loop (its session id is in
+Hook scope: only dev-loop workers (ALF_SEAT is set by alf-dispatch) and the
+session currently running /alf:dev-loop (its session id is in
 .factory/runs/<run>/orchestrator.session until <run>/ended exists). Your own
 sessions are untouched.
 
@@ -120,14 +120,14 @@ def check_gh(rest):
         if sub == "review" and any(a in ("--approve", "-a") for a in sargs):
             return "approving is a human's call"
         if sub == "create" and not any(a in ("--draft", "-d") for a in sargs):
-            return "the band opens draft PRs only (add --draft)"
+            return "the dev loop opens draft PRs only (add --draft)"
     if group == "api":
         joined = " ".join(args)
         if re.search(r"mergePullRequest|markPullRequestReadyForReview|enablePullRequestAutoMerge|"
                      r"/pulls/[^/\s]+/merge\b|APPROVE", joined):
             return "merge / ready / approve through the API is still a human's call"
         if re.search(r"/reviews\b", joined) and "--input" in args:
-            return "submitting a review from a file is not allowed in the band"
+            return "submitting a review from a file is not allowed in the dev loop"
         if "graphql" in args and any(re.match(r"query=@", a) for a in args):
             return "GraphQL from a file cannot be checked; inline the query"
     return None
@@ -203,7 +203,7 @@ def integration_branch(cwd):
 
 
 def argv_mode(argv):
-    """Called by the git/gh shims that every band worker gets on its PATH, whatever agent it runs."""
+    """Called by the git/gh shims that every dev-loop worker gets on its PATH, whatever agent it runs."""
     prog, args = argv[0], argv[1:]
     integ, _ = integration_branch(os.getcwd())
     reason = check_command(shlex.join([prog] + args), integ)
