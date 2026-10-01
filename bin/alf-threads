@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# alf-threads — review threads on draft PRs, for the PR Guardian.
+#
+#   alf-threads pending <pr> [<pr> ...]   PRs with unresolved threads, one line each
+#   alf-threads list <pr>                 unresolved threads as JSON lines
+#   alf-threads reply <thread-id> <body-file>
+#   alf-threads resolve <thread-id>
+#
+# The orchestrator asks `pending` once per pass for every open draft in the run,
+# rather than waiting on any one PR: a bot review arrives when it arrives, and a
+# per-PR wait buys nothing and costs the loop its turn.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need gh jq
+
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+owner_repo() { gh repo view --json owner,name --jq '.owner.login + " " + .name'; }
+
+threads_json() { # pr
+  local owner name
+  read -r owner name < <(owner_repo)
+  gh api graphql -f owner="$owner" -f name="$name" -F pr="$1" -f query='
+    query($owner: String!, $name: String!, $pr: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $pr) {
+          isDraft state headRefName
+          reviewThreads(first: 100) {
+            nodes {
+              id isResolved isOutdated path line
+              comments(first: 30) { nodes { author { login } body createdAt } }
+            }
+          }
+        }
+      }
+    }'
+}
+
+cmd_pending() {
+  local pr n
+  for pr in "$@"; do
+    pr="${pr#\#}"
+    if ! n="$(threads_json "$pr" | jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved | not)] | length')"; then
+      printf '#%s\tERROR could not read threads\n' "$pr"; continue
+    fi
+    [[ "$n" -gt 0 ]] && printf '#%s\t%s unresolved\n' "$pr" "$n"
+  done
+  return 0
+}
+
+cmd_list() {
+  threads_json "${1#\#}" | jq -c '.data.repository.pullRequest.reviewThreads.nodes[]
+    | select(.isResolved | not)
+    | {id, path, line, outdated: .isOutdated,
+       comments: [.comments.nodes[] | {by: .author.login, body}]}'
+}
+
+cmd_reply() {
+  local id="$1" file="$2"
+  [[ -f "$file" ]] || die "reply body file not found: $file"
+  gh api graphql -f id="$id" -f body="$(cat "$file")" -f query='
+    mutation($id: ID!, $body: String!) {
+      addPullRequestReviewThreadReply(input: {pullRequestReviewThreadId: $id, body: $body}) { comment { id } }
+    }' --jq '.data.addPullRequestReviewThreadReply.comment.id'
+}
+
+cmd_resolve() {
+  gh api graphql -f id="$1" -f query='
+    mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }' \
+    --jq '.data.resolveReviewThread.thread.isResolved'
+}
+
+sub="${1:-}"; shift || true
+case "$sub" in
+  pending) [[ $# -ge 1 ]] || usage; cmd_pending "$@" ;;
+  list)    [[ $# -eq 1 ]] || usage; cmd_list "$1" ;;
+  reply)   [[ $# -eq 2 ]] || usage; cmd_reply "$1" "$2" ;;
+  resolve) [[ $# -eq 1 ]] || usage; cmd_resolve "$1" ;;
+  *) usage ;;
+esac
