@@ -1,0 +1,46 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skill frontmatter (Agent Skills spec)
+        run: python3 scripts/validate_skills.py
+
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x bin/alf-lib.sh bin/alf-seat bin/alf-dispatch bin/alf-wait \
+            bin/alf-board bin/alf-ready bin/alf-threads bin/alf-ledger bin/shims/git bin/shims/gh scripts/smoke.sh
+
+      - name: Python syntax
+        run: python3 -m py_compile hooks/guard.py bin/alf-stats scripts/validate_skills.py
+
+      - name: Smoke test (seats, dispatch, wait, board, limits, ledger, stats, guard)
+        run: bash scripts/smoke.sh
+
+      - name: Plugin and marketplace manifests
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate . --strict
+
+  macos-bash-3:
+    # macOS ships bash 3.2; make sure the scripts still run there.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Smoke test on /bin/bash 3.2
+        run: |
+          export PATH="/bin:/usr/bin:$PATH"
+          bash --version | head -1
+          bash scripts/smoke.sh
