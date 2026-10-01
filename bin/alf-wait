@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# alf-wait — block until a dispatch in this run settles, then print its status line.
+#
+#   alf-wait <run-dir> [--timeout-min N] [--interval-sec N]
+#
+# Run this as a BACKGROUND shell command and end the turn. A session re-sends its
+# whole context on every turn, and the orchestrator is the fattest session in the
+# run: waiting in turns is the most expensive way to do nothing.
+#
+# Never hangs silently. A worker whose process died, or whose log has not grown
+# for --timeout-min, is reported as DIED or SILENT so the board gets a row
+# instead of the loop stalling for hours unnoticed. Each settled dispatch is
+# reported exactly once; call it again for the next one.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need jq
+
+[[ $# -ge 1 ]] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+RUN="$1"; shift
+TIMEOUT_MIN="$(cfg '.band.wait_timeout_min' 45)"
+INTERVAL=15
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --timeout-min)  TIMEOUT_MIN="$2"; shift 2 ;;
+    --interval-sec) INTERVAL="$2"; shift 2 ;;
+    *) die "unknown flag: $1" ;;
+  esac
+done
+
+mkdir -p "$RUN/seats"
+SEEN="$RUN/seats/.reported"
+touch "$SEEN"
+
+# GNU and BSD stat disagree, and GNU `stat -f` means something else entirely, so pick once.
+if stat -c %Y / >/dev/null 2>&1; then STAT_MTIME=(stat -c %Y); else STAT_MTIME=(stat -f %m); fi
+mtime() {
+  local t
+  t="$("${STAT_MTIME[@]}" "$1" 2>/dev/null || true)"
+  [[ "$t" =~ ^[0-9]+$ ]] && echo "$t" || echo 0
+}
+
+report() { # key line
+  printf '%s\n' "$2"
+  printf '%s\n' "$1" >>"$SEEN"
+  exit 0
+}
+
+field() { jq -r "$1 // empty" "$2"; }
+
+while true; do
+  running=0
+  for f in "$RUN"/seats/*.json; do
+    [[ -f "$f" ]] || continue
+    state="$(field .state "$f")"
+    key="$(basename "$f")|$state"
+    if grep -qxF "$key" "$SEEN"; then
+      [[ "$state" == running || "$state" == starting ]] && running=$((running + 1))
+      continue
+    fi
+    role="$(field .role "$f")"; seat="$(field .seat "$f")"; ticket="$(field .ticket "$f")"; log="$(field .log "$f")"
+    case "$state" in
+      starting|running)
+        pid="$(field .pid "$f")"
+        last_activity="$(mtime "$log")"
+        [[ "$last_activity" == 0 ]] && last_activity="$(mtime "$f")"
+        age=$(( $(date +%s) - last_activity ))
+        if [[ -n "$pid" ]] && ! pid_alive "$pid"; then
+          sleep 2   # finalize may be writing; re-read once
+          state="$(field .state "$f")"
+          [[ "$state" != running ]] && continue
+          report "$key" "ALF $role DIED seat=$seat ticket=$ticket log=$log"
+        fi
+        if [[ -z "$pid" ]] && (( age > 120 )); then
+          report "$key" "ALF $role DIED seat=$seat ticket=$ticket reason=never-started log=$log"
+        fi
+        if (( age > TIMEOUT_MIN * 60 )); then
+          report "$key" "ALF $role SILENT seat=$seat ticket=$ticket minutes=$((age / 60)) log=$log"
+        fi
+        running=$((running + 1))
+        ;;
+      *)
+        report "$key" "$(field '.result' "$f") seat=$seat ticket=$ticket"
+        ;;
+    esac
+  done
+  if (( running == 0 )); then
+    echo "ALF wait IDLE nothing-running run=$(basename "$RUN")"
+    exit 0
+  fi
+  sleep "$INTERVAL"
+done
