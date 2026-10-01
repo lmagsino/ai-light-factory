@@ -15,10 +15,10 @@
 # log, <run-dir>/seats/<Seat>.<n>.log. Wait for it with alf-wait, never by
 # polling in a turn.
 #
-# Refuses to dispatch unless the prompt names its SKILL.md by an absolute path
-# that exists: a skill reference that does not resolve produces no error in the
-# worker. It is read as prose and ignored, and the output still looks like the
-# real thing. Every worker must end with a status line starting "ALF ";
+# Refuses to dispatch unless every file the prompt names (the seat contract and
+# any companion SKILL.md) is an absolute path that exists: a reference that does
+# not resolve produces no error in the worker. It is read as prose and ignored,
+# and the output still looks like the real thing. Every worker must end with a status line starting "ALF ";
 # a run without one is recorded as NOT_RUN, never as a pass.
 
 # shellcheck source=bin/alf-lib.sh
@@ -47,12 +47,20 @@ SEAT_DIR="$(worktree_root)/$SEAT"
 [[ -d "$SEAT_DIR" ]] || die "seat $SEAT has no worktree - run alf-seat acquire $ROLE first"
 
 # --- the silent-skill guard ---------------------------------------------------
-refs="$(grep -oE '[^[:space:]"`(]*SKILL\.md' "$PROMPT" | sort -u || true)"
-[[ -n "$refs" ]] || die "prompt names no SKILL.md - every seat must be told which skill to follow, by absolute path"
+# Every file the prompt names (the seat contract, companion SKILL.md files from
+# other packs) must be an absolute path that exists. A reference that does not
+# resolve produces no error in the worker: it is read as prose and ignored.
+# (run-dir files the worker will create are not checked; only instructions are.)
+refs="$(grep -oE '/[^[:space:]"`()]*\.md' "$PROMPT" | grep -E "^$ALF_ROOT/|/SKILL\.md$" | sort -u || true)"
+grep -qE "$ALF_ROOT/skills/[^[:space:]]+\.md" "$PROMPT" \
+  || die "prompt names no seat contract under $ALF_ROOT/skills - every seat must be told what to follow, by absolute path"
 while IFS= read -r ref; do
-  [[ "$ref" == /* ]] || die "skill reference is not an absolute path: $ref - refusing to dispatch"
-  [[ -r "$ref" ]] || die "skill reference does not resolve: $ref - refusing to dispatch (it would fail silently)"
+  [[ -z "$ref" ]] && continue
+  [[ -r "$ref" ]] || die "file reference does not resolve: $ref - refusing to dispatch (it would fail silently)"
 done <<<"$refs"
+while IFS= read -r ref; do
+  [[ -z "$ref" || "$ref" == /* ]] || die "a SKILL.md is named by a relative path ($ref) - use absolute paths so any agent can read it"
+done < <(grep -oE '[^[:space:]"`(]*SKILL\.md' "$PROMPT" | sort -u || true)
 
 # --- seat config -------------------------------------------------------------
 VENDOR="$(cfg ".seats.$ROLE.vendor" claude)"
@@ -61,7 +69,7 @@ MODEL="$(cfg ".seats.$ROLE.model" '')"
 EFFORT="$(cfg ".seats.$ROLE.effort" high)"
 MAX_USD="$(cfg ".seats.$ROLE.max_usd" 5)"
 MAX_TURNS="$(cfg ".seats.$ROLE.max_turns" 150)"
-PERM="$(cfg '.band.permission_mode' dontAsk)"
+PERM="$(cfg '.loop.permission_mode' dontAsk)"
 SAME_VENDOR="false"
 
 if [[ -n "$CMD" ]]; then
@@ -86,7 +94,7 @@ LOG="$RUN/seats/$SEAT.$N.log"
 LAST="$RUN/seats/$SEAT.$N.last"
 STATUS="$RUN/seats/$SEAT.$N.json"
 
-# Tools a band worker may use without asking. Merge / ready / approve are denied
+# Tools a dev-loop worker may use without asking. Merge / ready / approve are denied
 # here AND by the plugin hook: two locks, because this one is the property the
 # whole line rests on. There is no blanket `gh api`: threads go through
 # alf-threads, which only lists, replies and resolves.
@@ -98,7 +106,7 @@ for key in test test_changed lint e2e; do
   c="$(cfg ".commands.$key" '')"
   [[ -n "$c" ]] && ALLOWED+=("Bash($c)" "Bash($c *)")
 done
-while IFS= read -r extra; do [[ -n "$extra" ]] && ALLOWED+=("$extra"); done < <(jq -r '.band.allowed_tools[]? // empty' "$(config_path)")
+while IFS= read -r extra; do [[ -n "$extra" ]] && ALLOWED+=("$extra"); done < <(jq -r '.loop.allowed_tools[]? // empty' "$(config_path)")
 DENIED=("Bash(gh pr merge *)" "Bash(gh pr ready *)" "Bash(gh pr review *)" "Bash(git push --force *)" "Bash(git push -f *)")
 
 # The parent writes the status once, before launch. After that only the child
