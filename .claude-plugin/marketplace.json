@@ -1,0 +1,14 @@
+{
+  "name": "ai-light-factory",
+  "owner": {
+    "name": "Leo Magsino Jr"
+  },
+  "description": "AI Light Factory: a light software factory that stops at a reviewed draft PR.",
+  "plugins": [
+    {
+      "name": "alf",
+      "source": "./",
+      "description": "A light software factory. PRD in, reviewed draft PRs out. The agents draft; you merge."
+    }
+  ]
+}

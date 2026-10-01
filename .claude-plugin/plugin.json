@@ -1,0 +1,22 @@
+{
+  "name": "alf",
+  "version": "0.1.0",
+  "description": "AI Light Factory: a light software factory. PRD in, reviewed draft PRs out. Settle decisions, plan with real edges, run an unattended build band (two lanes, cross-vendor review, severity ladder) that stops at a draft PR, then verify every flag state. Any agent per seat.",
+  "author": {
+    "name": "Leo Magsino Jr"
+  },
+  "homepage": "https://github.com/lmagsino/ai-light-factory",
+  "repository": "https://github.com/lmagsino/ai-light-factory",
+  "license": "MIT",
+  "keywords": [
+    "software-factory",
+    "light-factory",
+    "ai-agents",
+    "coding-agents",
+    "agent-skills",
+    "code-review",
+    "worktrees",
+    "playwright",
+    "feature-flags"
+  ]
+}
