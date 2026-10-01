@@ -88,6 +88,23 @@ Requirements: git, an authenticated `gh`, `jq` and `python3`. The orchestrator r
 
 <!-- Results from real runs go here, failures included. See docs/demo.md. -->
 
+## Skills
+
+| Skill | When | What it does |
+|---|---|---|
+| `/alf:setup` | once per repo | Finds your test, dev-server, e2e and feature-flag commands, picks an agent for each seat, and writes `.factory/config.json` and the seams block in AGENTS.md. |
+| `/alf:architect` | once per project | Reads the PRD and everything it links, then settles each open decision with you, one question at a time. Writes numbered decision cards, each naming the trap it leaves behind. |
+| `/alf:plan` | once per project | Checks how much of the work already exists, then writes milestones, XS/S tickets, real blocking edges and a lane model. |
+| `/alf:tickets` | once per plan | Does a dry run, asks "create these?", then opens the GitHub milestones and issues and gates each one. |
+| `/alf:loop` | per milestone | Runs the unattended build band: up to two tickets at a time through build, cross-vendor review and fixes, to a draft PR. Prints the board as it goes. |
+| `build` | dispatched by the loop | The Developer seat. Builds test-first, fixes only the findings it is handed, squashes, and opens a draft PR only from green tests. |
+| `review` | dispatched by the loop | The Reviewer seat, from another vendor. Checks correctness plus three reach questions: outward contracts, shared code paths, and deliberate deviations. |
+| `guardian` | dispatched by the loop | The PR Guardian. Answers and resolves review threads and rebases stacked PRs. Never marks a PR ready. |
+| `/alf:verify` | per milestone | Drives the running app in every feature-flag state, and records each journey as PASS, FAIL, NOT RUN or N/A with evidence. |
+| `/alf:retro` | after a run | Works out which stage should have caught each problem, proposes the check to add there, and prints the run's stats. |
+
+Every skill is a `SKILL.md` in the open [Agent Skills](https://agentskills.io/specification) format, so the seat skills run in any agent that reads it.
+
 ## Docs
 
 [The line](docs/the-line.md) · [Guardrails](docs/guardrails.md) · [Rules](docs/rules.md) · [Install and agents](docs/install.md) · [Cost](docs/cost.md) · [Comparison](docs/comparison.md) · [Demo](docs/demo.md)
