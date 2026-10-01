@@ -1,11 +1,11 @@
 # Working on AI Light Factory
 
-AI Light Factory (`alf`): skills in `skills/` (Agent Skills format), scripts in `bin/`, git/gh shims in `bin/shims/`, a guard in `hooks/`, and templates in `templates/`. It installs as a Claude Code plugin; the seats can run any coding agent. Any agent that reads AGENTS.md reads this file.
+AI Light Factory (`alf`): two skills in `skills/` (`dev-loop` and `verify`, Agent Skills format), seat contracts in `skills/dev-loop/seats/`, scripts in `bin/`, git/gh shims in `bin/shims/`, a guard in `hooks/`, and templates in `templates/`. Decisions, plan and tickets come from Matt Pocock's and Addy Osmani's skill packs; don't re-implement them here. It installs as a Claude Code plugin; the seats can run any coding agent. Any agent that reads AGENTS.md reads this file.
 
 ## Rules for changes
 
 - **Skills follow the Agent Skills spec.** `name` must match the directory name: lowercase letters, digits and hyphens, at most 64 characters. `description` must be at most 1024 characters, and say what the skill does and when to use it. Keep each SKILL.md under 500 lines, and move detail into `references/`.
-- **Portable skills stay portable.** `review`, `build` and `guardian` can run under any agent, so use only spec frontmatter fields there (`name`, `description`, `license`, `compatibility`, `metadata`). Claude-only fields (`disable-model-invocation`, `argument-hint`) are fine in `loop` and `tickets`, which always run in Claude Code.
+- **Seat contracts stay portable.** The files in `skills/dev-loop/seats/` are read by path by any agent, so they are plain markdown with no agent-specific syntax. Claude-only frontmatter (`disable-model-invocation`, `argument-hint`) is fine in `dev-loop`, which always runs in Claude Code.
 - **Prefer a mechanical check to a sentence.** If a rule can live in a script (`bin/`) or the hook, put it there and have the skill call it.
 - **Scripts:** bash that runs on macOS's bash 3.2 (no `${x,,}`, no `mapfile`, no associative arrays), with `set -euo pipefail`, and only `jq`, `git`, `gh` and python3 stdlib. They must pass `shellcheck`. Every script prints usage from its header comment.
 - **Every rule cites its reason.** A rule with no *why* gets deleted by the next person who finds it inconvenient.
