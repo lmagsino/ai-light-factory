@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "repo": {
+    "integration_branch": "main",
+    "human": ""
+  },
+  "tracker": "github",
+  "commands": {
+    "setup": "",
+    "test": "",
+    "test_changed": "",
+    "lint": "",
+    "dev_server": "",
+    "dev_url": "http://localhost:3000",
+    "e2e": ""
+  },
+  "flags": {
+    "platform": "none",
+    "notes": ""
+  },
+  "seats": {
+    "developer": {
+      "vendor": "claude",
+      "command": "",
+      "model": "opus",
+      "effort": "high",
+      "max_usd": 8,
+      "max_turns": 200
+    },
+    "reviewer": {
+      "vendor": "codex",
+      "command": "",
+      "model": "",
+      "effort": "high",
+      "max_usd": 4,
+      "max_turns": 80,
+      "fallback_model": "sonnet"
+    },
+    "guardian": {
+      "vendor": "claude",
+      "command": "",
+      "model": "opus",
+      "effort": "high",
+      "max_usd": 4,
+      "max_turns": 120
+    },
+    "verifier": {
+      "vendor": "claude",
+      "command": "",
+      "model": "opus",
+      "effort": "high",
+      "max_usd": 10,
+      "max_turns": 250
+    }
+  },
+  "band": {
+    "lanes": 2,
+    "review_rounds": 2,
+    "guardian_batch": 5,
+    "bot_reviewer": "",
+    "worktree_root": "../{repo}.alf",
+    "wait_timeout_min": 45,
+    "permission_mode": "dontAsk",
+    "allowed_tools": []
+  },
+  "ladder": {
+    "fix": [
+      "critical",
+      "high"
+    ],
+    "fix_medium_under_lines": 20,
+    "drop": [
+      "low"
+    ]
+  },
+  "paths": {
+    "decisions": ".factory/decisions",
+    "plans": ".factory/plans",
+    "verdicts": ".factory/verdicts",
+    "runs": ".factory/runs",
+    "matrix": ".factory/matrix.md",
+    "precedents": ".factory/precedents.md"
+  }
+}
