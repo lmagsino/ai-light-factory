@@ -1,13 +1,8 @@
----
-name: build
-description: The Developer seat of the alf build band. Builds one ticket test-first in its own worktree, fixes only the findings it is handed, and ships by squashing to one commit and opening a draft PR with a decision log, only when tests are green. Dispatched by /alf:loop with a prompt that names the mode (build, fix or ship); not for direct use.
-license: MIT
-compatibility: Needs git, gh, and the repository test command. Works in any coding agent that can run shell commands and edit files.
----
+# Developer seat contract
 
-# Developer seat
+You are working in a seat worktree that `/alf:dev-loop` dispatched you into. Your prompt gives you: `mode`, the ticket file, acceptance criteria, base, branch, run dir, test command, and the absolute paths of two companion skills from Addy Osmani's agent-skills: `incremental-implementation` and `test-driven-development`. **Do not fetch the issue.** Everything you need is in the prompt and the files it names.
 
-You are working in a seat worktree that an orchestrator dispatched you into. Your prompt gives you: `mode`, the ticket file, acceptance criteria, decisions, base, branch, run dir and test command. **Do not fetch the issue.** Everything you need is in the prompt and the files it names.
+The companion skills say *how to build*. This contract adds the dev loop's rules: one ticket, the stop conditions, the status line, and how to ship.
 
 Output discipline applies in every mode. Send long command output to a file in the run dir and read only the summary: test runs, diffs and logs. A full test log pasted into your context stays there for every later turn. Your **last line** must be one of the `ALF developer ...` status lines in your prompt. With no status line, your work is recorded as NOT RUN.
 
@@ -24,9 +19,9 @@ Write the evidence file first: the command, its output summary, file and line. "
 ## mode: build
 
 1. `git fetch origin`. If `origin/<branch>` exists, check it out (`git switch <branch>`), because you are resuming. Otherwise run `git switch -c <branch> origin/<base>` (or `<base>` if it is a local stacked branch that has been pushed).
-2. Read the ticket file and the decision cards it names. Treat the card's **trap** field as a constraint.
-3. Make it test-first where the code allows: write or extend a test that fails for the right reason, then make it pass. If you have TDD or incremental-implementation skills from another pack (Addy Osmani's agent-skills, superpowers, Matt Pocock's skills), their discipline applies here.
-4. Keep to the acceptance criteria and the ticket's *Out of scope* section. No drive-by refactors: they become review findings, and they make the diff harder to read for the one human who must.
+2. Read the ticket file, and any ADR in `docs/adr/` it touches. Use the terms in `GLOSSARY.md`.
+3. Read the two companion SKILL.md files named in your prompt and follow them: build in thin increments, test-first (a test that fails for the right reason, then the code that makes it pass). The ticket is your one task; do not read or update `tasks/todo.md`.
+4. Keep to the acceptance criteria. No drive-by refactors: they become review findings, and they make the diff harder to read for the one human who must.
 5. Run the test command with output to `<run>/build-tests.log`. Read the tail.
 6. Commit with a message that names the ticket. Multiple commits are fine at this stage.
 7. `git push -u origin <branch>`. Never leave unpushed work in a seat. The seat is reused, and work that exists only in a seat is lost or blocks the sweep.

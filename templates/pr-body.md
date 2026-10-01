@@ -10,13 +10,13 @@ Closes #{issue}{stack_note}
 
 ## Decision log
 
-Everything the band decided without you. A finding that is neither fixed nor listed here has been lost.
+Everything the dev loop decided without you. A finding that is neither fixed nor listed here has been lost.
 
 | # | Source | Severity | Finding | Call | Where |
 |---|---|---|---|---|---|
-| R1.1 | Reviewer, round 1 | High | … | Fixed | `abc1234` |
-| R1.4 | Reviewer, round 1 | Medium (~60 lines) | … | Not addressed: larger than the ladder allows | |
-| R1.6 | Reviewer, round 1 | Low | … | Dropped: {reason} | |
+| R1.1 | Reviewer, round 1 | Critical | … | Fixed | `abc1234` |
+| R1.4 | Reviewer, round 1 | Important (~60 lines) | … | Not addressed: larger than the ladder allows | |
+| R1.6 | Reviewer, round 1 | Suggestion | … | Dropped: {reason} | |
 
 ## Reach
 
@@ -26,7 +26,7 @@ Everything the band decided without you. A finding that is neither fixed nor lis
 
 ## Not addressed
 
-{the Medium and larger findings left for you, one line each, or "nothing"}
+{the larger Important findings left for you, one line each, or "nothing"}
 
 ## Tests
 
