@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# alf-seat — named worktrees ("seats") for the build band.
+#
+#   alf-seat acquire <role> [--ref <git-ref>] [--run <run-dir>] [--ticket <n>] [--seat <Seat>]
+#   alf-seat release <Seat>
+#   alf-seat list
+#   alf-seat sweep [--dry-run]
+#
+# A seat is named for the role that sits in it: Developer, Developer-2,
+# Reviewer, Reviewer-2, Guardian, Guardian-2, Verifier. Never a ticket name,
+# never a nameless detached tree in /tmp. The name is the only thing that lets
+# the sweep tell a seat from somebody's abandoned work.
+#
+# acquire enforces the band's limits mechanically: two seats per role (one
+# Verifier), at most band.lanes tickets in flight (never more than two), and the
+# run's --budget. It runs commands.setup in a seat whose lockfiles changed.
+# --seat asks for a specific seat (a round-2 review re-uses its round-1 seat).
+#
+# Safety property: nothing with uncommitted or unpushed work is ever removed
+# or reset, for any reason. Automatic cleanup is only safe because the unsafe
+# case is never automatic.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need git jq
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+WT_ROOT=""
+busy_dir() { printf '%s/.busy' "$WT_ROOT"; }
+
+seat_busy() { # Seat -> 0 if held by a live dispatch or an explicit claim
+  local f pid
+  f="$(busy_dir)/$1"
+  [[ -f "$f" ]] || return 1
+  pid="$(jq -r '.pid // empty' "$f" 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && ! pid_alive "$pid"; then
+    rm -f "$f"   # a claim whose process died is not a claim; the tree itself is left alone
+    return 1
+  fi
+  return 0
+}
+
+max_lanes() {
+  local n
+  n="$(cfg '.band.lanes' 2)"
+  [[ "$n" =~ ^[0-9]+$ ]] || die "band.lanes must be 1 or 2"
+  (( n > 2 )) && die "band.lanes=$n refused: two is the ceiling, not a starting point"
+  (( n < 1 )) && n=1
+  echo "$n"
+}
+
+check_limits() { # run ticket — refuse a new lane past --lanes or --budget
+  local run="$1" ticket="$2" state lanes in_lane already budget drafted
+  state="$run/state.json"
+  [[ -n "$run" && -f "$state" && -n "$ticket" ]] || return 0
+  lanes="$(max_lanes)"
+  local s_lanes; s_lanes="$(jq -r '.lanes // empty' "$state")"
+  [[ -n "$s_lanes" && "$s_lanes" -lt "$lanes" ]] && lanes="$s_lanes"
+  already="$(jq --argjson t "$ticket" '[.tickets[] | select(.id == $t and .flag == "LANE")] | length' "$state")"
+  (( already > 0 )) && return 0          # this ticket already holds a lane
+  in_lane="$(jq '[.tickets[] | select(.flag == "LANE")] | length' "$state")"
+  if (( in_lane >= lanes )); then printf 'NO_FREE_LANE\t%s/%s\n' "$in_lane" "$lanes"; exit 3; fi
+  budget="$(jq -r '.budget // 0' "$state")"
+  drafted="$(jq '[.tickets[] | select(.pr != null)] | length' "$state")"
+  if (( budget > 0 && drafted >= budget )); then printf 'BUDGET_SPENT\t%s/%s\n' "$drafted" "$budget"; exit 4; fi
+}
+
+run_setup() { # Seat path
+  local cmd want have log
+  cmd="$(cfg '.commands.setup' '')"
+  [[ -n "$cmd" ]] || return 0
+  want="$(deps_hash "$2")"
+  have="$(cat "$(seat_home_dir)/$1.deps" 2>/dev/null || true)"
+  [[ "$want" == "$have" ]] && return 0
+  log="$(seat_home_dir)/$1.setup.log"
+  if (cd "$2" && bash -c "$cmd") >"$log" 2>&1; then
+    printf '%s\n' "$want" >"$(seat_home_dir)/$1.deps"
+  else
+    die "commands.setup failed in seat $1 - see $log"
+  fi
+}
+
+cmd_acquire() {
+  local role="" ref="" run="" ticket="" want=""
+  role="${1:-}"; shift || true
+  [[ -n "$role" ]] || usage
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ref) ref="$2"; shift 2 ;;
+      --run) run="$2"; shift 2 ;;
+      --ticket) ticket="${2#\#}"; shift 2 ;;
+      --seat) want="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+  local base cap i seat path
+  base="$(role_title "$role")"
+  cap="$(role_cap "$role")"
+  [[ "$role" == developer ]] && check_limits "$run" "$ticket"
+  [[ -n "$ref" ]] || ref="origin/$(cfg '.repo.integration_branch' main)"
+  git -C "$(main_root)" fetch --quiet origin 2>/dev/null || warn "fetch failed; using local refs"
+
+  for ((i = 1; i <= cap; i++)); do
+    seat="$base"; [[ $i -gt 1 ]] && seat="$base-$i"
+    [[ -n "$want" && "$seat" != "$want" ]] && continue
+    seat_busy "$seat" && continue
+    path="$WT_ROOT/$seat"
+    if [[ -d "$path" ]]; then
+      if is_dirty "$path" || seat_unpushed "$seat" "$path"; then
+        warn "seat $seat holds uncommitted or unpushed work; skipping it (a human should look)"
+        continue
+      fi
+      git -C "$path" checkout --quiet --detach "$ref"
+    else
+      git -C "$(main_root)" worktree add --quiet --detach "$path" "$ref"
+    fi
+    seat_mark "$seat" "$path"
+    run_setup "$seat" "$path"
+    mkdir -p "$(busy_dir)"
+    jq -n --arg seat "$seat" --arg role "$role" --arg run "$run" --arg ticket "$ticket" \
+          --arg at "$(now_iso)" '{seat:$seat, role:$role, run:$run, ticket:$ticket, claimed_at:$at}' \
+          >"$(busy_dir)/$seat"
+    printf '%s\t%s\n' "$seat" "$path"
+    return 0
+  done
+  printf 'NO_FREE_SEAT\t%s\n' "${want:-$role}"
+  exit 3
+}
+
+cmd_release() {
+  local seat="${1:-}"
+  [[ -n "$seat" ]] || usage
+  rm -f "$(busy_dir)/$seat"
+  echo "released $seat"
+}
+
+pr_state_for_branch() {
+  command -v gh >/dev/null 2>&1 || { echo "UNKNOWN"; return; }
+  gh pr list --head "$1" --state all --json state --jq '.[0].state // "NONE"' 2>/dev/null || echo "UNKNOWN"
+}
+
+cmd_list() {
+  printf '%-12s %-5s %-44s %-5s %-8s\n' SEAT BUSY BRANCH/SHA DIRTY UNPUSHED
+  local d seat ref
+  for d in "$WT_ROOT"/*/; do
+    [[ -d "$d" ]] || continue
+    d="${d%/}"
+    seat="$(basename "$d")"
+    ref="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || git -C "$d" rev-parse --short HEAD 2>/dev/null || echo '?')"
+    printf '%-12s %-5s %-44.44s %-5s %-8s\n' "$seat" \
+      "$(seat_busy "$seat" && echo yes || echo no)" "$ref" \
+      "$(is_dirty "$d" && echo yes || echo no)" \
+      "$(seat_unpushed "$seat" "$d" && echo yes || echo no)"
+  done
+}
+
+cmd_sweep() {
+  local dry=0
+  [[ "${1:-}" == "--dry-run" ]] && dry=1
+  local integ d seat br state pr
+  integ="origin/$(cfg '.repo.integration_branch' main)"
+  git -C "$(main_root)" fetch --quiet origin 2>/dev/null || warn "fetch failed; sweeping against local refs"
+  git -C "$(main_root)" worktree prune
+
+  for d in "$WT_ROOT"/*/; do
+    [[ -d "$d" ]] || continue
+    d="${d%/}"
+    seat="$(basename "$d")"
+    if [[ -z "$(seat_role "$seat")" ]]; then
+      br="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || echo detached)"
+      pr="-"
+      [[ "$br" != detached ]] && pr="$(pr_state_for_branch "$br")"
+      echo "LEGACY  $seat  branch=$br  pr=$pr  - not a seat name; left alone"
+      continue
+    fi
+    if seat_busy "$seat"; then echo "BUSY    $seat"; continue; fi
+    if is_dirty "$d" || seat_unpushed "$seat" "$d"; then
+      echo "KEEP    $seat  uncommitted=$(git -C "$d" status --porcelain | wc -l | tr -d ' ') unpushed=$(seat_unpushed "$seat" "$d" && echo yes || echo no)  - needs a human"
+      continue
+    fi
+    br="$(git -C "$d" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+    state="NONE"; [[ -n "$br" ]] && state="$(pr_state_for_branch "$br")"
+    if [[ "$state" == "OPEN" ]]; then echo "OPEN    $seat  $br"; continue; fi
+    if is_base_seat "$seat"; then
+      echo "RESET   $seat  -> $integ"
+      if [[ $dry -eq 0 ]]; then
+        git -C "$d" checkout --quiet --detach "$integ"
+        seat_mark "$seat" "$d"
+      fi
+    else
+      echo "REMOVE  $seat  (overflow seat, work landed or abandoned)"
+      if [[ $dry -eq 0 ]]; then
+        git -C "$(main_root)" worktree remove "$d"
+        rm -f "$(seat_home_dir)/$seat" "$(seat_home_dir)/$seat.deps"
+      fi
+    fi
+  done
+}
+
+main() {
+  local sub="${1:-}"; shift || true
+  WT_ROOT="$(worktree_root)"
+  mkdir -p "$WT_ROOT"
+  case "$sub" in
+    acquire) cmd_acquire "$@" ;;
+    release) cmd_release "$@" ;;
+    list)    cmd_list ;;
+    sweep)   cmd_sweep "$@" ;;
+    *) usage ;;
+  esac
+}
+main "$@"
