@@ -1,0 +1,12 @@
+# alf's own runtime files, if you dogfood it on this repo
+.factory/runs/
+.factory/ledger.jsonl
+
+# editors / OS
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# python
+__pycache__/

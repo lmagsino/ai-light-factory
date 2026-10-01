@@ -1,0 +1,4 @@
+source-path=SCRIPTDIR
+external-sources=true
+# GraphQL queries are single-quoted on purpose
+disable=SC2016
