@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+# alf-dispatch — start one worker in one seat, in the background.
+#
+#   alf-dispatch <role> <Seat> <run-dir> <prompt-file> [--ticket <n>] [--label <text>]
+#
+# Reads the seat's agent from .factory/config.json and runs it inside the seat's
+# worktree, in the background, then returns at once. Any agent CLI works: give the
+# seat a "command". The prompt arrives on stdin and as a file path in
+# $ALF_PROMPT_FILE, so `your-agent -p "$(cat "$ALF_PROMPT_FILE")"` fits most CLIs.
+# "claude" and "codex" are built in, with model, effort and budget flags wired up.
+#
+# Whatever the agent, the worker runs with ALF_SEAT set and with bin/shims first on
+# its PATH, so its git and gh calls pass through the guard.
+# Each dispatch gets its own status file, <run-dir>/seats/<Seat>.<n>.json, and
+# log, <run-dir>/seats/<Seat>.<n>.log. Wait for it with alf-wait, never by
+# polling in a turn.
+#
+# Refuses to dispatch unless the prompt names its SKILL.md by an absolute path
+# that exists: a skill reference that does not resolve produces no error in the
+# worker. It is read as prose and ignored, and the output still looks like the
+# real thing. Every worker must end with a status line starting "ALF ";
+# a run without one is recorded as NOT_RUN, never as a pass.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need git jq
+
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+[[ $# -ge 4 ]] || usage
+ROLE="$1" SEAT="$2" RUN="$3" PROMPT="$4"; shift 4
+TICKET="" LABEL=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --ticket) TICKET="${2#\#}"; shift 2 ;;
+    --label)  LABEL="$2"; shift 2 ;;
+    *) die "unknown flag: $1" ;;
+  esac
+done
+
+role_title "$ROLE" >/dev/null
+[[ "$(seat_role "$SEAT")" == "$ROLE" ]] || die "seat $SEAT does not belong to role $ROLE"
+[[ -f "$PROMPT" ]] || die "prompt file not found: $PROMPT"
+RUN="$(cd "$RUN" && pwd)"
+PROMPT="$(cd "$(dirname "$PROMPT")" && pwd)/$(basename "$PROMPT")"
+SEAT_DIR="$(worktree_root)/$SEAT"
+[[ -d "$SEAT_DIR" ]] || die "seat $SEAT has no worktree - run alf-seat acquire $ROLE first"
+
+# --- the silent-skill guard ---------------------------------------------------
+refs="$(grep -oE '[^[:space:]"`(]*SKILL\.md' "$PROMPT" | sort -u || true)"
+[[ -n "$refs" ]] || die "prompt names no SKILL.md - every seat must be told which skill to follow, by absolute path"
+while IFS= read -r ref; do
+  [[ "$ref" == /* ]] || die "skill reference is not an absolute path: $ref - refusing to dispatch"
+  [[ -r "$ref" ]] || die "skill reference does not resolve: $ref - refusing to dispatch (it would fail silently)"
+done <<<"$refs"
+
+# --- seat config -------------------------------------------------------------
+VENDOR="$(cfg ".seats.$ROLE.vendor" claude)"
+CMD="$(cfg ".seats.$ROLE.command" '')"
+MODEL="$(cfg ".seats.$ROLE.model" '')"
+EFFORT="$(cfg ".seats.$ROLE.effort" high)"
+MAX_USD="$(cfg ".seats.$ROLE.max_usd" 5)"
+MAX_TURNS="$(cfg ".seats.$ROLE.max_turns" 150)"
+PERM="$(cfg '.band.permission_mode' dontAsk)"
+SAME_VENDOR="false"
+
+if [[ -n "$CMD" ]]; then
+  RUNNER="command"
+  need "${CMD%% *}"
+elif [[ "$VENDOR" == codex ]] && ! command -v codex >/dev/null 2>&1; then
+  warn "codex not installed - the $ROLE falls back to claude. The PR will say if that makes it a same-vendor review."
+  VENDOR="claude"; MODEL="$(cfg ".seats.$ROLE.fallback_model" sonnet)"; RUNNER="claude"
+elif [[ "$VENDOR" == claude || "$VENDOR" == codex ]]; then
+  RUNNER="$VENDOR"
+else
+  die "seat $ROLE uses vendor '$VENDOR' but has no \"command\" in .factory/config.json"
+fi
+[[ "$RUNNER" == claude ]] && need claude
+# A reviewer from the builder's vendor shares the builder's blind spots. Say so.
+if [[ "$ROLE" == reviewer && "$VENDOR" == "$(cfg '.seats.developer.vendor' claude)" ]]; then SAME_VENDOR="true"; fi
+SHIMS="$ALF_ROOT/bin/shims"
+
+mkdir -p "$RUN/seats"
+N=1; while [[ -e "$RUN/seats/$SEAT.$N.json" ]]; do N=$((N + 1)); done
+LOG="$RUN/seats/$SEAT.$N.log"
+LAST="$RUN/seats/$SEAT.$N.last"
+STATUS="$RUN/seats/$SEAT.$N.json"
+
+# Tools a band worker may use without asking. Merge / ready / approve are denied
+# here AND by the plugin hook: two locks, because this one is the property the
+# whole line rests on. There is no blanket `gh api`: threads go through
+# alf-threads, which only lists, replies and resolves.
+ALLOWED=(Read Edit Write Glob Grep TodoWrite "Bash(git *)" "Bash(gh pr create *)" "Bash(gh pr view *)"
+         "Bash(gh pr edit *)" "Bash(gh pr diff *)" "Bash(gh pr checks *)" "Bash(gh issue view *)"
+         "Bash(${ALF_ROOT}/bin/*)" "Bash(alf-threads *)" "Bash(alf-ready *)"
+         "Bash(ls *)" "Bash(cat *)" "Bash(mkdir *)" "Bash(wc *)" "Bash(tail *)" "Bash(head *)" "Bash(grep *)")
+for key in test test_changed lint e2e; do
+  c="$(cfg ".commands.$key" '')"
+  [[ -n "$c" ]] && ALLOWED+=("Bash($c)" "Bash($c *)")
+done
+while IFS= read -r extra; do [[ -n "$extra" ]] && ALLOWED+=("$extra"); done < <(jq -r '.band.allowed_tools[]? // empty' "$(config_path)")
+DENIED=("Bash(gh pr merge *)" "Bash(gh pr ready *)" "Bash(gh pr review *)" "Bash(git push --force *)" "Bash(git push -f *)")
+
+# The parent writes the status once, before launch. After that only the child
+# writes it (pid at start, result at the end), so no two processes race on it.
+jq -n --arg seat "$SEAT" --arg role "$ROLE" --arg ticket "$TICKET" --arg label "$LABEL" \
+      --arg vendor "$VENDOR" --arg model "$MODEL" --arg effort "$EFFORT" --arg log "$LOG" \
+      --arg started "$(now_iso)" --argjson same "$SAME_VENDOR" --argjson n "$N" \
+      '{seat:$seat, n:$n, role:$role, ticket:$ticket, label:$label, vendor:$vendor, model:$model,
+        effort:$effort, same_vendor:$same, log:$log, started:$started, state:"starting", pid:null}' >"$STATUS"
+
+status_set() { # jq args... (filter last)
+  local tmp; tmp="$(mktemp)"
+  jq "$@" "$STATUS" >"$tmp" && mv "$tmp" "$STATUS"
+}
+
+finalize() { # runs in the background child once the worker exits
+  local code="$1" line state subtype cost turns
+  line="$(grep -E '^ALF ' "$LAST" 2>/dev/null | tail -1 || true)"
+  subtype="$(jq -r 'select(.type? == "result") | .subtype // empty' "$LOG" 2>/dev/null | tail -1 || true)"
+  cost="$(jq -r 'select(.type? == "result") | .total_cost_usd // empty' "$LOG" 2>/dev/null | tail -1 || true)"
+  turns="$(jq -r 'select(.type? == "result") | .num_turns // empty' "$LOG" 2>/dev/null | tail -1 || true)"
+  if [[ -n "$line" ]]; then
+    state="done"; [[ "$code" != 0 ]] && state="failed"
+  elif [[ -n "$subtype" && "$subtype" != success ]]; then
+    state="stopped"; line="ALF $ROLE STOPPED reason=$subtype log=$LOG"   # hit max turns or max budget
+  else
+    state="not_run"; line="ALF $ROLE NOT_RUN reason=no-status-line exit=$code log=$LOG"
+  fi
+  line="$line vendor=$VENDOR model=${MODEL:-default} same_vendor=$SAME_VENDOR"
+
+  case "$ROLE" in
+    developer|guardian)
+      # Leave the seat usable: detach a clean, pushed branch so any seat can check it out next.
+      if is_dirty "$SEAT_DIR" || seat_unpushed "$SEAT" "$SEAT_DIR"; then
+        state="parked"; line="$line seat_holds_unpushed_work=true"
+      else
+        git -C "$SEAT_DIR" checkout --quiet --detach 2>/dev/null || true
+        seat_mark "$SEAT" "$SEAT_DIR"
+      fi ;;
+    reviewer)
+      # A review seat is scratch: the reviewer's output is its findings file in the run dir.
+      git -C "$SEAT_DIR" reset --quiet --hard 2>/dev/null || true
+      git -C "$SEAT_DIR" clean -fdq 2>/dev/null || true ;;
+  esac
+
+  status_set --arg state "$state" --arg line "$line" --arg ended "$(now_iso)" --arg code "$code" \
+     --arg cost "$cost" --arg turns "$turns" \
+     '.state=$state | .result=$line | .ended=$ended | .exit=($code|tonumber)
+      | .cost_usd=(if $cost=="" then null else ($cost|tonumber) end)
+      | .turns=(if $turns=="" then null else ($turns|tonumber) end)'
+  ledger_append "$(jq -c --arg run "$(basename "$RUN")" '{event:"dispatch", run:$run} + .' "$STATUS")"
+  rm -f "$(worktree_root)/.busy/$SEAT"
+}
+
+run_worker() {
+  export ALF_SEAT="$SEAT" ALF_ROLE="$ROLE" ALF_RUN="$RUN" ALF_ROOT
+  export PATH="$SHIMS:$PATH" ALF_PROMPT_FILE="$PROMPT"
+  status_set --argjson pid "$$" '.pid=$pid | .state="running"'
+  local busy tmp
+  busy="$(worktree_root)/.busy/$SEAT"
+  if [[ -f "$busy" ]]; then
+    tmp="$(mktemp)"; jq --argjson pid "$$" '.pid=$pid' "$busy" >"$tmp" && mv "$tmp" "$busy"
+  fi
+  local code=0
+  cd "$SEAT_DIR" || { finalize 1; return; }
+  if [[ "$RUNNER" == command ]]; then
+    # Any agent CLI: prompt on stdin, everything it prints goes to the log, and the
+    # status line is read from the log.
+    bash -c "$CMD" <"$PROMPT" >"$LOG" 2>&1 || code=$?
+    grep -E '^ALF ' "$LOG" | tail -1 >"$LAST" || true
+  elif [[ "$RUNNER" == claude ]]; then
+    # stream-json keeps the log growing, so alf-wait can tell working from silent.
+    local args=(-p --output-format stream-json --verbose --max-turns "$MAX_TURNS" --max-budget-usd "$MAX_USD"
+                --effort "$EFFORT" --permission-mode "$PERM" --add-dir "$RUN")
+    [[ -n "$MODEL" ]] && args+=(--model "$MODEL")
+    args+=(--allowedTools "${ALLOWED[@]}" --disallowedTools "${DENIED[@]}")
+    claude "${args[@]}" <"$PROMPT" >"$LOG" 2>"$LOG.err" || code=$?
+    jq -r 'select(.type? == "result") | .result // empty' "$LOG" >"$LAST" 2>/dev/null || true
+  else
+    # No network in the sandbox; the run dir is the only writable place outside the seat.
+    local args=(exec --sandbox workspace-write --add-dir "$RUN" -c "model_reasoning_effort=\"$EFFORT\""
+                -o "$LAST" -C "$SEAT_DIR")
+    [[ -n "$MODEL" ]] && args+=(-m "$MODEL")
+    codex "${args[@]}" - <"$PROMPT" >"$LOG" 2>&1 || code=$?
+  fi
+  finalize "$code"
+}
+
+nohup bash -c "$(declare -f run_worker finalize status_set now_iso ledger_append ledger_path main_root \
+    worktree_root cfg config_path repo_name is_dirty has_unpushed seat_unpushed seat_mark seat_home_dir die warn); \
+  $(declare -p ROLE SEAT RUN PROMPT VENDOR RUNNER CMD MODEL EFFORT MAX_USD MAX_TURNS PERM ALLOWED DENIED LOG LAST \
+    STATUS SEAT_DIR SAME_VENDOR SHIMS ALF_ROOT); \
+  set -uo pipefail; run_worker" >/dev/null 2>&1 &
+
+printf 'dispatched %s role=%s vendor=%s model=%s effort=%s status=%s\n' \
+  "$SEAT" "$ROLE" "$VENDOR" "${MODEL:-default}" "$EFFORT" "$STATUS"
