@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""alf-stats: turn the ledger into the numbers you publish.
+
+    alf-stats [--ledger PATH] [--run RUN_ID ...] [--no-gh] [--json]
+
+Reads .factory/ledger.jsonl (written by alf-dispatch and alf-ledger)
+and prints a markdown table: attempted, drafted, merged by a human, parked and
+why, review rounds, findings by call, sessions and cost per ticket, and how
+many reviews ran cross-vendor. With gh available it asks GitHub which drafted
+PRs a human has since merged, because the line itself never merges.
+
+Report failures next to successes. A results table with no parked rows on a
+real project is usually a table that stopped looking.
+"""
+import argparse
+import json
+import os
+import shutil
+import statistics
+import subprocess
+import sys
+from collections import Counter, defaultdict
+from datetime import datetime
+
+
+def main_root():
+    try:
+        common = subprocess.check_output(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"], text=True
+        ).strip()
+        return os.path.dirname(common)
+    except Exception:
+        return os.getcwd()
+
+
+def parse_ts(s):
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
+
+
+def pr_merged(pr):
+    try:
+        out = subprocess.check_output(
+            ["gh", "pr", "view", str(pr), "--json", "state,mergedAt"], text=True, stderr=subprocess.DEVNULL
+        )
+        return json.loads(out).get("state") == "MERGED"
+    except Exception:
+        return None
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--ledger", default=os.path.join(main_root(), ".factory", "ledger.jsonl"))
+    ap.add_argument("--run", action="append", default=[])
+    ap.add_argument("--no-gh", action="store_true")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+
+    if not os.path.exists(a.ledger):
+        sys.exit(f"alf-stats: no ledger at {a.ledger}")
+    events = []
+    with open(a.ledger, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+    if a.run:
+        events = [e for e in events if e.get("run") in a.run]
+
+    tickets = {}  # last outcome wins per (run, issue)
+    for e in events:
+        if e.get("event") == "ticket":
+            tickets[(e["run"], e["issue"])] = e
+    dispatches = [e for e in events if e.get("event") == "dispatch"]
+
+    per_ticket_sessions = defaultdict(int)
+    per_ticket_cost = defaultdict(float)
+    per_ticket_span = defaultdict(list)
+    for d in dispatches:
+        key = (d.get("run"), int(d["ticket"]) if str(d.get("ticket", "")).isdigit() else None)
+        per_ticket_sessions[key] += 1
+        per_ticket_cost[key] += float(d.get("cost_usd") or 0)
+        for k in ("started", "ended"):
+            t = parse_ts(d.get(k, ""))
+            if t:
+                per_ticket_span[key].append(t)
+
+    outcomes = Counter(t["outcome"] for t in tickets.values())
+    attempted = sum(outcomes.values())
+    drafted = [t for t in tickets.values() if t["outcome"] == "drafted"]
+    parked = [t for t in tickets.values() if t["outcome"] == "parked"]
+
+    merged = None
+    use_gh = not a.no_gh and shutil.which("gh")
+    if use_gh:
+        states = [pr_merged(t.get("pr")) for t in drafted if t.get("pr")]
+        if states and all(s is None for s in states):
+            merged = None  # gh present but not authenticated, or offline
+        else:
+            merged = sum(1 for s in states if s)
+
+    rounds = [t.get("rounds") for t in tickets.values() if isinstance(t.get("rounds"), (int, float))]
+    fixed = sum(t.get("fixed", 0) for t in tickets.values())
+    not_addr = sum(t.get("not_addressed", 0) for t in tickets.values())
+    dropped = sum(t.get("dropped", 0) for t in tickets.values())
+    reviews = [d for d in dispatches if d.get("role") == "reviewer"]
+    same_vendor = sum(1 for d in reviews if d.get("same_vendor"))
+    not_run = sum(1 for d in dispatches if d.get("state") == "not_run")
+
+    keys = [(t["run"], t["issue"]) for t in tickets.values()]
+    sessions = [per_ticket_sessions[k] for k in keys if per_ticket_sessions[k]]
+    drafted_keys = [(t["run"], t["issue"]) for t in drafted]
+    cost_drafted = [per_ticket_cost[k] for k in drafted_keys if per_ticket_cost[k]]
+    spans = []
+    for k in drafted_keys:
+        ts = per_ticket_span.get(k) or []
+        if len(ts) >= 2:
+            spans.append((max(ts) - min(ts)).total_seconds() / 60)
+    total_cost = sum(float(d.get("cost_usd") or 0) for d in dispatches)
+    reasons = Counter(t.get("reason", "unspecified") for t in parked)
+
+    def pct(n, d):
+        return f"{n} ({round(100 * n / d)}%)" if d else str(n)
+
+    rows = [
+        ("Tickets attempted", str(attempted)),
+        ("Reached a draft PR", pct(len(drafted), attempted)),
+        ("Merged by a human", "n/a (gh unavailable)" if merged is None else pct(merged, len(drafted))),
+        ("Parked for a human", pct(len(parked), attempted)
+         + ("" if not reasons else " - " + ", ".join(f"{r} x{n}" for r, n in reasons.most_common()))),
+        ("Review rounds per ticket (mean)", f"{statistics.mean(rounds):.1f}" if rounds else "n/a"),
+        ("Findings fixed / not addressed / dropped", f"{fixed} / {not_addr} / {dropped}"),
+        ("Reviews run cross-vendor", pct(len(reviews) - same_vendor, len(reviews)) if reviews else "n/a"),
+        ("Worker sessions per ticket (mean)", f"{statistics.mean(sessions):.1f}" if sessions else "n/a"),
+        ("Worker runs with no status line (NOT RUN)", str(not_run)),
+        ("Cost per drafted ticket (median)", f"${statistics.median(cost_drafted):.2f}" if cost_drafted else "n/a"),
+        ("Worker wall-clock per drafted ticket (median)", f"{statistics.median(spans):.0f} min" if spans else "n/a"),
+        ("Total worker cost", f"${total_cost:.2f}"),
+    ]
+
+    if a.json:
+        print(json.dumps(dict(rows), indent=2))
+        return
+    print("| Metric | Value |\n|---|---|")
+    for k, v in rows:
+        print(f"| {k} | {v} |")
+    print("\nCost covers band workers only (the orchestrator runs in your own session). "
+          "Codex seats report no cost; count them by sessions.")
+
+
+if __name__ == "__main__":
+    main()

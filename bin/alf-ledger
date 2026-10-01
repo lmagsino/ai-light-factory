@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# alf-ledger — record what happened to a ticket, for stats and retros.
+#
+#   alf-ledger ticket <run-dir> <issue> <outcome> [key=value ...]
+#
+# outcome: drafted | parked | skipped
+# Useful keys: pr=123 reason="round-2 High" rounds=2 fixed=5 not_addressed=1
+#              dropped=3 critical=0 high=2 medium=4 low=3 same_vendor=false
+#
+# Dispatches are recorded automatically by alf-dispatch. The ledger lives
+# at .factory/ledger.jsonl in the main checkout and is gitignored; publish the
+# output of alf-stats, not the ledger.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need jq
+
+[[ "${1:-}" == ticket && $# -ge 4 ]] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+shift
+RUN="$1" ISSUE="${2#\#}" OUTCOME="$3"; shift 3
+case "$OUTCOME" in drafted|parked|skipped) ;; *) die "outcome must be drafted|parked|skipped" ;; esac
+
+obj="$(jq -n --arg run "$(basename "$RUN")" --arg issue "$ISSUE" --arg outcome "$OUTCOME" --arg at "$(now_iso)" \
+        '{event:"ticket", run:$run, issue:($issue|tonumber), outcome:$outcome, at:$at}')"
+for kv in "$@"; do
+  k="${kv%%=*}" v="${kv#*=}"
+  if [[ "$v" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+    obj="$(jq --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$obj")"
+  elif [[ "$v" == true || "$v" == false ]]; then
+    obj="$(jq --arg k "$k" --argjson v "$v" '.[$k]=$v' <<<"$obj")"
+  else
+    obj="$(jq --arg k "$k" --arg v "$v" '.[$k]=$v' <<<"$obj")"
+  fi
+done
+ledger_append "$obj"
+echo "recorded #$ISSUE $OUTCOME"
