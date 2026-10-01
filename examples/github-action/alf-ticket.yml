@@ -1,9 +1,12 @@
-# EXPERIMENTAL: run one ticket through AI Light Factory's band when an issue is labelled.
+# EXPERIMENTAL: run one ticket through AI Light Factory's dev loop when an issue is labelled.
 #
 # Copy to .github/workflows/ in the repo you want to build in (not in AI Light Factory).
-# It runs the readiness gate first, then the band for that single ticket with one
+# It runs the readiness gate first, then the dev loop for that single ticket with one
 # lane, a budget of one, a turn cap and a job timeout. It opens at most one
 # DRAFT PR, and never merges.
+#
+# The repo's .factory/config.json must point "companions" at
+# ~/.alf/companions/agent-skills/skills/<name>/SKILL.md, which the step below clones.
 #
 # Secrets: ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN), and OPENAI_API_KEY for a
 # cross-vendor Codex reviewer. Without OPENAI_API_KEY the reviewer falls back to
@@ -28,7 +31,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  band:
+  dev-loop:
     if: github.event.label.name == 'factory:ready'
     runs-on: ubuntu-latest
     timeout-minutes: 60          # the time budget for one ticket
@@ -55,13 +58,22 @@ jobs:
           npm install -g @openai/codex
           printenv OPENAI_API_KEY | codex login --with-api-key
 
-      - name: Band, one ticket
+      - name: Companion skills the seats read by path
+        run: git clone --depth 1 https://github.com/addyosmani/agent-skills ~/.alf/companions/agent-skills
+
+      - name: Dev loop, one ticket
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          plugin_marketplaces: https://github.com/lmagsino/ai-light-factory.git
-          plugins: alf@ai-light-factory
-          prompt: "/alf:loop #${{ github.event.issue.number }} --lanes 1 --budget 1"
+          plugin_marketplaces: |
+            https://github.com/lmagsino/ai-light-factory.git
+            https://github.com/addyosmani/agent-skills.git
+            https://github.com/mattpocock/skills.git
+          plugins: |
+            alf@ai-light-factory
+            agent-skills@addy-agent-skills
+            mattpocock-skills@mattpocock
+          prompt: "/alf:dev-loop #${{ github.event.issue.number }} --lanes 1 --budget 1"
           claude_args: "--max-turns 300"
