@@ -1,7 +1,7 @@
 {
   "name": "alf",
-  "version": "0.1.0",
-  "description": "AI Light Factory: a light software factory. PRD in, reviewed draft PRs out. Settle decisions, plan with real edges, run an unattended build band (two lanes, cross-vendor review, severity ladder) that stops at a draft PR, then verify every flag state. Any agent per seat.",
+  "version": "0.2.0",
+  "description": "AI Light Factory: a light software factory. PRD in, reviewed draft PRs out. Built on Matt Pocock's and Addy Osmani's skills for decisions, plans, tickets, building and review; adds an unattended dev loop (two lanes, cross-vendor review, severity ladder) that stops at a draft PR, and a verifier for every flag state. Any agent per seat.",
   "author": {
     "name": "Leo Magsino Jr"
   },
