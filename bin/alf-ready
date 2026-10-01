@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# alf-ready — the gate at the band's entrance. Is this ticket buildable
+# without asking anyone anything?
+#
+#   alf-ready <issue-number> [--label]
+#   alf-ready --file <ticket.md>
+#
+# The band never asks, because by the time it runs there is nothing left to ask.
+# This script is how that stays true: a ticket that fails here is an upstream
+# defect (a decision the Architect did not settle, or a ticket the Planner wrote
+# without an answer in it) and goes back up the line, not into a worktree.
+#
+# Checks the sections of templates/ticket.md:
+#   Acceptance criteria  at least one "- [ ]" item, none containing TBD/TODO/???
+#   Decisions            card references (D3, D7) or "none"
+#   Blocked by           "#12, #14" or "none" - stated, never implied
+#   Size                 XS or S. Anything bigger gets split before it is built
+#   Test plan            not empty
+#   Open questions       absent, empty, or "none"
+#
+# Exit 0 = READY, 1 = NOT READY (reasons on stdout), 2 = usage error.
+# --label sets factory:ready or factory:needs-decision on the issue.
+
+# shellcheck source=bin/alf-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
+need python3
+
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+ISSUE="" FILE="" LABEL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --file)  FILE="$2"; shift 2 ;;
+    --label) LABEL=1; shift ;;
+    -h|--help) usage ;;
+    *) ISSUE="${1#\#}"; shift ;;
+  esac
+done
+[[ -n "$ISSUE" || -n "$FILE" ]] || usage
+
+if [[ -n "$ISSUE" ]]; then
+  need gh
+  FILE="$(mktemp)"
+  gh issue view "$ISSUE" --json body --jq .body >"$FILE"
+fi
+
+set +e
+REASONS="$(python3 - "$FILE" <<'PY'
+import re, sys
+body = open(sys.argv[1], encoding="utf-8").read()
+
+def section(name):
+    m = re.search(r"^#{2,3}\s*" + re.escape(name) + r"\s*$(.*?)(?=^#{1,3}\s|\Z)", body, re.M | re.S | re.I)
+    return None if m is None else m.group(1).strip()
+
+def meaningful(text):
+    t = re.sub(r"<!--.*?-->", "", text or "", flags=re.S).strip()
+    return t
+
+problems = []
+
+ac = section("Acceptance criteria")
+if ac is None:
+    problems.append("missing section: Acceptance criteria")
+else:
+    items = re.findall(r"^\s*[-*]\s*\[[ xX]\]\s*(.+)$", ac, re.M)
+    if not items:
+        problems.append("Acceptance criteria has no checklist items (- [ ] ...)")
+    vague = [i for i in items if re.search(r"\bTBD\b|\bTODO\b|\?\?\?", i)]
+    for v in vague:
+        problems.append(f"Acceptance criterion is not decided yet: {v.strip()[:80]}")
+
+dec = section("Decisions")
+if dec is None or not meaningful(dec):
+    problems.append("Decisions is missing or empty (list card refs like D3, or write 'none')")
+elif not re.search(r"\bD\d+\b|^\W*none\W*$", meaningful(dec), re.I | re.M):
+    problems.append(f"Decisions has no card references (D3, D7) and is not 'none': {meaningful(dec)[:60]}")
+
+blk = section("Blocked by")
+if blk is None or not meaningful(blk):
+    problems.append("Blocked by is missing (write '#12, #14' or 'none' - never leave edges implied)")
+elif not re.search(r"#\d+|\bnone\b", meaningful(blk), re.I):
+    problems.append(f"Blocked by is not '#n' references or 'none': {meaningful(blk)[:60]}")
+
+size = section("Size")
+if size is None or not meaningful(size):
+    problems.append("Size is missing (XS or S)")
+else:
+    s = meaningful(size).split()[0].upper().strip("*\x60")
+    if s not in ("XS", "S"):
+        problems.append(f"Size is {s}: split it into XS/S tickets before the band builds it")
+
+tp = section("Test plan")
+if tp is None or not meaningful(tp):
+    problems.append("Test plan is missing or empty")
+
+oq = section("Open questions")
+if oq is not None:
+    t = meaningful(oq)
+    if t and not re.fullmatch(r"(?i)[-*\s]*none\.?", t):
+        problems.append("Open questions is not empty: settle them with /alf:architect first")
+
+print("\n".join(problems))
+sys.exit(1 if problems else 0)
+PY
+)"
+CODE=$?
+set -e
+
+name="${ISSUE:+#$ISSUE}"; name="${name:-$FILE}"
+if [[ $CODE -eq 0 ]]; then
+  echo "READY $name"
+else
+  echo "NOT READY $name"
+  printf '%s\n' "$REASONS" | sed 's/^/  - /'
+fi
+
+if [[ $LABEL -eq 1 && -n "$ISSUE" ]]; then
+  if [[ $CODE -eq 0 ]]; then
+    gh issue edit "$ISSUE" --add-label factory:ready --remove-label factory:needs-decision >/dev/null || warn "could not label #$ISSUE"
+  else
+    gh issue edit "$ISSUE" --add-label factory:needs-decision --remove-label factory:ready >/dev/null || warn "could not label #$ISSUE"
+  fi
+fi
+exit $CODE
