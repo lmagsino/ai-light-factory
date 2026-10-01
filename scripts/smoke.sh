@@ -24,29 +24,31 @@ mkdir -p .factory
 jq '.repo.integration_branch="main" | .commands.test="true" | .seats.reviewer.vendor="claude"' \
   "$HERE/templates/config.json" > .factory/config.json
 
-echo "== readiness gate"
+echo "== readiness gate (to-tickets issue format)"
 cat > "$T/good.md" <<'MD'
-<!-- alf:T1.1 -->
-## Context
-Thing.
+## Parent
+
+#40
+
+## What to build
+
+A user can export an invoice as CSV.
+
 ## Acceptance criteria
-- [ ] it exports
-## Decisions
-D1
+
+- [ ] Export downloads one row per line item
+- [ ] Amounts are in cents
+
 ## Blocked by
-none
-## Size
-S
-## Test plan
-unit test
-## Open questions
-none
+
+- None (can start immediately)
 MD
-"$BIN/alf-ready" --file "$T/good.md" >/dev/null && ok "complete ticket is READY" || fail "complete ticket rejected"
-sed -e 's/^S$/M/' -e 's/it exports/it exports TBD/' -e '/## Blocked by/,+1d' "$T/good.md" > "$T/bad.md"
+"$BIN/alf-ready" --file "$T/good.md" >/dev/null && ok "a to-tickets issue is READY" || fail "complete ticket rejected"
+sed -e 's/Amounts are in cents/Amounts TBD/' -e '/## Blocked by/,$d' "$T/good.md" > "$T/bad.md"
+printf '## Size\n\nM\n' >> "$T/bad.md"
 out="$("$BIN/alf-ready" --file "$T/bad.md" || true)"
 grep -q "NOT READY" <<<"$out" && grep -q "Size is M" <<<"$out" && grep -q "TBD" <<<"$out" && grep -q "Blocked by is missing" <<<"$out" \
-  && ok "incomplete ticket is NOT READY with three reasons" || fail "bad ticket: $out"
+  && ok "an incomplete ticket is NOT READY with three reasons" || fail "bad ticket: $out"
 
 echo "== seats"
 read -r seat path < <("$BIN/alf-seat" acquire developer --ticket 1)
@@ -76,18 +78,20 @@ export PATH="$T/fakebin:$PATH"
 RUN="$T/app/.factory/runs/smoke"
 mkdir -p "$RUN"
 read -r seat _ < <("$BIN/alf-seat" acquire developer --ticket 1 --run "$RUN")
-echo "Follow $HERE/skills/build/SKILL.md. mode: build" > "$RUN/p.md"
+echo "Seat contract: $HERE/skills/dev-loop/seats/developer.md. mode: build. Write findings to $RUN/1/not-yet-written.md" > "$RUN/p.md"
 "$BIN/alf-dispatch" developer "$seat" "$RUN" "$RUN/p.md" --ticket 1 >/dev/null && ok "dispatch starts"
 line="$(with_timeout 30 "$BIN/alf-wait" "$RUN" --interval-sec 1)"
 grep -q "ALF developer DONE" <<<"$line" && ok "wait returns the status line" || fail "wait: $line"
 [[ "$(jq -r .cost_usd "$RUN/seats/$seat.1.json")" == 0.42 ]] && ok "cost recorded" || fail "cost not recorded"
 grep -q "same_vendor=false" <<<"$line" && ok "status line carries vendor provenance" || fail "no provenance: $line"
 
-echo "Follow /nope/SKILL.md" > "$RUN/bad.md"
+echo "Seat contract: $HERE/skills/dev-loop/seats/developer.md. How to build: /nope/SKILL.md" > "$RUN/bad.md"
 read -r seat _ < <("$BIN/alf-seat" acquire developer --ticket 2 --run "$RUN")
-if "$BIN/alf-dispatch" developer "$seat" "$RUN" "$RUN/bad.md" 2>/dev/null; then fail "dispatched with a missing skill"; else ok "refuses a SKILL.md path that does not resolve"; fi
-echo "Follow skills/build/SKILL.md" > "$RUN/rel.md"
+if "$BIN/alf-dispatch" developer "$seat" "$RUN" "$RUN/bad.md" 2>/dev/null; then fail "dispatched with a missing skill"; else ok "refuses a companion SKILL.md path that does not resolve"; fi
+echo "Seat contract: $HERE/skills/dev-loop/seats/developer.md. How to build: skills/x/SKILL.md" > "$RUN/rel.md"
 if "$BIN/alf-dispatch" developer "$seat" "$RUN" "$RUN/rel.md" 2>/dev/null; then fail "dispatched with a relative skill path"; else ok "refuses a relative SKILL.md path"; fi
+echo "Just do the ticket." > "$RUN/none.md"
+if "$BIN/alf-dispatch" developer "$seat" "$RUN" "$RUN/none.md" 2>/dev/null; then fail "dispatched with no seat contract"; else ok "refuses a prompt that names no seat contract"; fi
 "$BIN/alf-seat" release "$seat" >/dev/null
 
 cat > "$T/fakebin/claude" <<'SH'
@@ -202,10 +206,10 @@ grep -q NO_FREE_LANE <<<"$out" && ok "a third lane is refused" || fail "third la
 jq '.tickets[1].flag="DONE" | .tickets[1].pr=9 | .budget=1' "$RUN/state.json" > "$RUN/s.tmp" && mv "$RUN/s.tmp" "$RUN/state.json"
 out="$("$BIN/alf-seat" acquire developer --run "$RUN" --ticket 3 || true)"
 grep -q BUDGET_SPENT <<<"$out" && ok "--budget is enforced when a lane is requested" || fail "budget: $out"
-jq '.band.lanes=3' .factory/config.json > c.tmp && mv c.tmp .factory/config.json
+jq '.loop.lanes=3' .factory/config.json > c.tmp && mv c.tmp .factory/config.json
 out="$("$BIN/alf-seat" acquire developer --run "$RUN" --ticket 3 2>&1 || true)"
-grep -q "refused" <<<"$out" && ok "band.lanes=3 is refused" || fail "lanes=3: $out"
-jq '.band.lanes=2' .factory/config.json > c.tmp && mv c.tmp .factory/config.json
+grep -q "refused" <<<"$out" && ok "loop.lanes=3 is refused" || fail "lanes=3: $out"
+jq '.loop.lanes=2' .factory/config.json > c.tmp && mv c.tmp .factory/config.json
 
 echo "== a squashed-away sha does not jam a seat"
 read -r seat path < <("$BIN/alf-seat" acquire reviewer)

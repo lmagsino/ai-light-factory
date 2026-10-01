@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
-# alf-ready — the gate at the band's entrance. Is this ticket buildable
+# alf-ready — the gate at the dev loop's entrance. Is this ticket buildable
 # without asking anyone anything?
 #
 #   alf-ready <issue-number> [--label]
 #   alf-ready --file <ticket.md>
 #
-# The band never asks, because by the time it runs there is nothing left to ask.
+# The dev loop never asks, because by the time it runs there is nothing left to ask.
 # This script is how that stays true: a ticket that fails here is an upstream
-# defect (a decision the Architect did not settle, or a ticket the Planner wrote
+# defect (a decision grill-with-docs did not settle, or a ticket to-tickets wrote
 # without an answer in it) and goes back up the line, not into a worktree.
 #
-# Checks the sections of templates/ticket.md:
+# Reads the issue format that Matt Pocock's to-tickets publishes:
+#   What to build        not empty
 #   Acceptance criteria  at least one "- [ ]" item, none containing TBD/TODO/???
-#   Decisions            card references (D3, D7) or "none"
-#   Blocked by           "#12, #14" or "none" - stated, never implied
+#   Blocked by           "#12", an issue URL, or "None" - stated, never implied.
+#                        On GitHub, native "blocked by" links count too.
+# and, when a ticket has them:
 #   Size                 XS or S. Anything bigger gets split before it is built
-#   Test plan            not empty
-#   Open questions       absent, empty, or "none"
+#   Open questions       empty or "none"
 #
 # Exit 0 = READY, 1 = NOT READY (reasons on stdout), 2 = usage error.
-# --label sets factory:ready or factory:needs-decision on the issue.
+# --label adds factory:ready or factory:needs-decision to the issue.
 
 # shellcheck source=bin/alf-lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/alf-lib.sh"
@@ -38,16 +39,20 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -n "$ISSUE" || -n "$FILE" ]] || usage
 
+NATIVE=""
 if [[ -n "$ISSUE" ]]; then
   need gh
   FILE="$(mktemp)"
   gh issue view "$ISSUE" --json body --jq .body >"$FILE"
+  # GitHub's native issue dependencies, when the tracker uses them instead of text.
+  NATIVE="$(gh api "repos/{owner}/{repo}/issues/$ISSUE/dependencies/blocked_by" --jq '[.[].number] | map("#" + tostring) | join(" ")' 2>/dev/null || echo "unavailable")"
 fi
 
 set +e
-REASONS="$(python3 - "$FILE" <<'PY'
+REASONS="$(python3 - "$FILE" "$NATIVE" <<'PY'
 import re, sys
 body = open(sys.argv[1], encoding="utf-8").read()
+native = sys.argv[2] if len(sys.argv) > 2 else ""
 
 def section(name):
     m = re.search(r"^#{2,3}\s*" + re.escape(name) + r"\s*$(.*?)(?=^#{1,3}\s|\Z)", body, re.M | re.S | re.I)
@@ -58,6 +63,10 @@ def meaningful(text):
     return t
 
 problems = []
+
+what = section("What to build")
+if what is None or not meaningful(what):
+    problems.append("What to build is missing or empty")
 
 ac = section("Acceptance criteria")
 if ac is None:
@@ -70,35 +79,25 @@ else:
     for v in vague:
         problems.append(f"Acceptance criterion is not decided yet: {v.strip()[:80]}")
 
-dec = section("Decisions")
-if dec is None or not meaningful(dec):
-    problems.append("Decisions is missing or empty (list card refs like D3, or write 'none')")
-elif not re.search(r"\bD\d+\b|^\W*none\W*$", meaningful(dec), re.I | re.M):
-    problems.append(f"Decisions has no card references (D3, D7) and is not 'none': {meaningful(dec)[:60]}")
-
 blk = section("Blocked by")
+native_ok = native not in ("", "unavailable")
 if blk is None or not meaningful(blk):
-    problems.append("Blocked by is missing (write '#12, #14' or 'none' - never leave edges implied)")
-elif not re.search(r"#\d+|\bnone\b", meaningful(blk), re.I):
-    problems.append(f"Blocked by is not '#n' references or 'none': {meaningful(blk)[:60]}")
+    if not native_ok:
+        problems.append("Blocked by is missing (list '#12' or 'None' - never leave edges implied)")
+elif not re.search(r"#\d+|/issues/\d+|\bnone\b", meaningful(blk), re.I):
+    problems.append(f"Blocked by names no issue (#12) and is not 'None': {meaningful(blk)[:60]}")
 
 size = section("Size")
-if size is None or not meaningful(size):
-    problems.append("Size is missing (XS or S)")
-else:
+if size is not None and meaningful(size):
     s = meaningful(size).split()[0].upper().strip("*\x60")
     if s not in ("XS", "S"):
-        problems.append(f"Size is {s}: split it into XS/S tickets before the band builds it")
-
-tp = section("Test plan")
-if tp is None or not meaningful(tp):
-    problems.append("Test plan is missing or empty")
+        problems.append(f"Size is {s}: split it before the dev loop builds it")
 
 oq = section("Open questions")
 if oq is not None:
     t = meaningful(oq)
     if t and not re.fullmatch(r"(?i)[-*\s]*none\.?", t):
-        problems.append("Open questions is not empty: settle them with /alf:architect first")
+        problems.append("Open questions is not empty: settle them with grill-with-docs first")
 
 print("\n".join(problems))
 sys.exit(1 if problems else 0)
