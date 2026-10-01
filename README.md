@@ -13,7 +13,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/line-dark.svg">
-    <img alt="The line: you write a PRD; the Architect settles decisions; the Planner writes tickets with real edges; a build band where one agent builds and an agent from another vendor reviews opens draft PRs; the Verifier checks every flag state; you merge." src="docs/assets/line-light.svg" width="100%">
+    <img alt="The line: you write a PRD; grill-with-docs settles the decisions; agent-skills plan writes the plan; to-tickets publishes tickets with blocking edges; the dev loop, where one agent builds, an agent from another vendor reviews, and a PR Guardian answers review threads, opens draft PRs; verify checks every flag state; you merge." src="docs/assets/line-light.svg" width="100%">
   </picture>
 </p>
 
@@ -35,16 +35,19 @@ This is that line, rebuilt from scratch for open source, with each lesson turned
 
 ## How it works
 
-| Stage | What happens | You decide |
-|---|---|---|
-| **1&nbsp;·&nbsp;Architect** | Reads the PRD and everything it links, then settles every open decision with you, one question at a time | *Do the decisions hold?* |
-| **2&nbsp;·&nbsp;Planner** | Splits the work into small tickets with real dependency edges, then creates the issues | *Right tickets? Create them?* |
-| **3&nbsp;·&nbsp;Build&nbsp;band** | Up to two tickets at a time. One agent builds test-first, an agent from another vendor reviews, and a draft PR opens only when the tests pass | Nothing. It runs unattended |
-| **4&nbsp;·&nbsp;Verifier** | Runs the app and checks every feature-flag state, reporting PASS, FAIL or NOT RUN | *Merge.* That step is always yours |
+The line is built from good skills that already exist, plus the two pieces they don't cover: an unattended dev loop and a verifier.
+
+| Stage | Skill | What happens | You decide |
+|---|---|---|---|
+| **1&nbsp;·&nbsp;Decide** | `grill-with-docs`<br><sub>Matt Pocock</sub> | Settles every open decision with you, one question at a time, and records them as ADRs | *Do the decisions hold?* |
+| **2&nbsp;·&nbsp;Plan** | `agent-skills:plan`<br><sub>Addy Osmani</sub> | Splits the work into small, verifiable tasks with dependencies | *Is this the right plan?* |
+| **3&nbsp;·&nbsp;Tickets** | `to-tickets`<br><sub>Matt Pocock</sub> | Publishes GitHub issues with acceptance criteria and blocking edges | *Right tickets, right edges?* |
+| **4&nbsp;·&nbsp;Dev&nbsp;loop** | `/alf:dev-loop`<br><sub>this repo</sub> | Up to two tickets at a time. One agent builds test-first, an agent from another vendor reviews, and a draft PR opens only when the tests pass | Nothing. It runs unattended |
+| **5&nbsp;·&nbsp;Verify** | `/alf:verify`<br><sub>this repo</sub> | Runs the app and checks every feature-flag state, reporting PASS, FAIL or NOT RUN | *Merge.* That step is always yours |
 
 ## Guardrails
 
-- **Decisions before code.** A ticket without criteria, edges and a size never reaches an agent.
+- **Decisions before code.** A ticket without acceptance criteria and blocking edges never reaches an agent.
 - **Stops at a draft PR.** Merge, ready and approve are blocked for every worker, whatever agent it runs.
 - **Green tests or no PR.**
 - **A second vendor reviews,** with fresh context, for at most two rounds.
@@ -70,40 +73,53 @@ Every seat (Developer, Reviewer, Guardian, Verifier) is an agent you choose. Any
 
 ## Quick start
 
+Install AI Light Factory and the two skill packs it builds on:
+
 ```text
 /plugin marketplace add lmagsino/ai-light-factory
 /plugin install alf@ai-light-factory
+/plugin marketplace add mattpocock/skills
+/plugin install mattpocock-skills@mattpocock
+/plugin marketplace add addyosmani/agent-skills
+/plugin install agent-skills@addy-agent-skills
 ```
+
+Then run the line:
 
 ```text
-/alf:setup                          # once per repo
-/alf:architect docs/prd.md          # settle the decisions
-/alf:plan                           # tickets with real edges
-/alf:tickets                        # asks "create these?"
-/alf:loop "M1" --budget 2           # unattended, two lanes max
-/alf:verify "M1"                    # every flag state
+/setup-matt-pocock-skills                         # once: point Matt's ticket skills at GitHub
+/alf:dev-loop setup                               # once per repo: seams, agents, companion paths
+/mattpocock-skills:grill-with-docs docs/prd.md    # 1. decide
+/agent-skills:plan                                # 2. plan
+/mattpocock-skills:to-tickets tasks/plan.md       # 3. tickets
+/alf:dev-loop #<parent-issue> --budget 2          # 4. dev loop, unattended
+/alf:verify #<parent-issue>                       # 5. every flag state
 ```
 
-Requirements: git, an authenticated `gh`, `jq` and `python3`. The orchestrator runs as a Claude Code plugin today. Full setup: [docs/install.md](docs/install.md).
+Requirements: git, an authenticated `gh`, `jq` and `python3`. The dev loop runs as a Claude Code plugin today, and its seats can be any agent. Full setup: [docs/install.md](docs/install.md).
 
 <!-- Results from real runs go here, failures included. See docs/demo.md. -->
 
 ## Skills
 
+**From this repo.** These two are the part no existing pack covered:
+
 | Skill | When | What it does |
 |---|---|---|
-| `/alf:setup` | once per repo | Finds your test, dev-server, e2e and feature-flag commands, picks an agent for each seat, and writes `.factory/config.json` and the seams block in AGENTS.md. |
-| `/alf:architect` | once per project | Reads the PRD and everything it links, then settles each open decision with you, one question at a time. Writes numbered decision cards, each naming the trap it leaves behind. |
-| `/alf:plan` | once per project | Checks how much of the work already exists, then writes milestones, XS/S tickets, real blocking edges and a lane model. |
-| `/alf:tickets` | once per plan | Does a dry run, asks "create these?", then opens the GitHub milestones and issues and gates each one. |
-| `/alf:loop` | per milestone | Runs the unattended build band: up to two tickets at a time through build, cross-vendor review and fixes, to a draft PR. Prints the board as it goes. |
-| `build` | dispatched by the loop | The Developer seat. Builds test-first, fixes only the findings it is handed, squashes, and opens a draft PR only from green tests. |
-| `review` | dispatched by the loop | The Reviewer seat, from another vendor. Checks correctness plus three reach questions: outward contracts, shared code paths, and deliberate deviations. |
-| `guardian` | dispatched by the loop | The PR Guardian. Answers and resolves review threads and rebases stacked PRs. Never marks a PR ready. |
-| `/alf:verify` | per milestone | Drives the running app in every feature-flag state, and records each journey as PASS, FAIL, NOT RUN or N/A with evidence. |
-| `/alf:retro` | after a run | Works out which stage should have caught each problem, proposes the check to add there, and prints the run's stats. |
+| `/alf:dev-loop` | per parent issue or milestone | Runs the unattended dev loop: up to two tickets at a time through build, cross-vendor review and fixes, to a draft PR, with a live board. Its seats are a Developer, a Reviewer from another vendor, and a PR Guardian that answers review threads and never marks a PR ready. Also has `setup` and `retro` modes. |
+| `/alf:verify` | per parent issue or milestone | Drives the running app in every feature-flag state, and records each journey as PASS, FAIL, NOT RUN or N/A with evidence. |
 
-Every skill is a `SKILL.md` in the open [Agent Skills](https://agentskills.io/specification) format, so the seat skills run in any agent that reads it.
+**From the companion packs,** used as published:
+
+| Skill | Pack | Role in the line |
+|---|---|---|
+| `grill-with-docs` | [Matt Pocock](https://github.com/mattpocock/skills) | Stage 1. Settles the decisions and writes ADRs and a glossary |
+| `to-tickets` | [Matt Pocock](https://github.com/mattpocock/skills) | Stage 3. Publishes tickets with blocking edges |
+| `plan` | [Addy Osmani](https://github.com/addyosmani/agent-skills) | Stage 2. Writes the plan |
+| `incremental-implementation`, `test-driven-development` | [Addy Osmani](https://github.com/addyosmani/agent-skills) | How the Developer seat builds |
+| `code-review-and-quality` | [Addy Osmani](https://github.com/addyosmani/agent-skills) | How the Reviewer seat reviews, plus the dev loop's three reach questions |
+
+The seats read the companion SKILL.md files by absolute path, so an agent from another vendor in a seat follows them too.
 
 ## Docs
 
@@ -111,11 +127,11 @@ Every skill is a `SKILL.md` in the open [Agent Skills](https://agentskills.io/sp
 
 ## Sources and inspiration
 
+- [mattpocock/skills](https://github.com/mattpocock/skills): `grill-with-docs` and `to-tickets`, which run stages 1 and 3.
+- [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills): `plan` for stage 2, and the build and review skills the seats follow.
 - Addy Osmani, [Software Factories, Light and Dark](https://addyosmani.com/blog/software-factories/): the light versus dark factory distinction this project is built on.
-- [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills): engineering skills for incremental builds, TDD and code review that pair well with the Developer and Reviewer seats.
 - [addyosmani/factory](https://github.com/addyosmani/factory): a reference light factory built on a GitHub issue queue.
-- [mattpocock/skills](https://github.com/mattpocock/skills): `grill-with-docs`, whose one-question-at-a-time interview the Architect borrows, and `to-tickets`.
-- [Agent Skills specification](https://agentskills.io/specification): the open `SKILL.md` format every skill here follows.
+- [Agent Skills specification](https://agentskills.io/specification): the open `SKILL.md` format these skills follow.
 - Claude Code [plugins](https://code.claude.com/docs/en/plugins-reference) and [hooks](https://code.claude.com/docs/en/hooks): how AI Light Factory installs and how its guard hook works.
 - [Codex CLI](https://developers.openai.com/codex/skills): the second-vendor reviewer in the reference setup.
 - [awesome-software-factories](https://github.com/varun1505/awesome-software-factories): the wider landscape. See [docs/comparison.md](docs/comparison.md) for how this project differs.
@@ -125,4 +141,4 @@ Every skill is a `SKILL.md` in the open [Agent Skills](https://agentskills.io/sp
 Built by **Leo Magsino Jr**, a tech lead working on how teams ship with fleets of coding agents without losing the plot.
 [GitHub](https://github.com/lmagsino)
 
-The term *light software factory* comes from Addy Osmani, and the Architect's interview style from Matt Pocock's `grill-with-docs`. See [CREDITS.md](CREDITS.md). Licensed [MIT](LICENSE).
+Built on Matt Pocock's and Addy Osmani's skills; the term *light software factory* is Addy's. See [CREDITS.md](CREDITS.md). Licensed [MIT](LICENSE).
